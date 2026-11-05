@@ -26,7 +26,7 @@ interface Enemy {
   tele: Telegraph | null; slam: boolean; attacks: number;
   room: Room; links: MonolithRef[]; dead: boolean; summons: number;
   bar: THREE.Group; barHp: THREE.Mesh; barPost: THREE.Mesh; hitFlash: number;
-  tut?: 'effigy' | 'shade';
+  tut?: 'effigy' | 'shade'; marks: number;
 }
 interface Bolt { mesh: THREE.Mesh; x: number; z: number; dx: number; dz: number; life: number; hit: Set<Enemy | MonolithRef> }
 interface Atk { strike: Strike; special: boolean; t: number; hit: boolean; yaw: number }
@@ -78,6 +78,7 @@ export class Game {
   private p = {
     x: 0, z: 0, ix: 0, iz: 0, yaw: 0, hero: 0, root: new THREE.Group(), anims: [] as Animator[],
     dashT: 0, dashCd: 0, dashDir: { x: 0, z: 1 }, ghostT: 0, iframes: 0, atk: null as Atk | null, comboIdx: 0, comboT: 0, buffered: 0,
+    momentum: 0, momT: 0, momCd: 0, crits: 0, dashStrikeT: 0, dashI: 0, charge: 0, charging: false, chargePulse: 0, guard: false, guardT: 0, counterT: 0, stunT: 0, dashHit: new Set<Enemy>(), guardFx: 0,
     parryT: 0, parryCd: 0, flurryT: 0, flurryTick: 0, swapCd: 0, boltCd: 0, speedNow: 0, mouseAim: false, hurtT: 0, shield: new THREE.Group(),
   };
 
@@ -108,7 +109,7 @@ export class Game {
       refillEnergy: () => this.heroes.forEach((h) => { h.energy = MAX_ENERGY; }),
       restoreHeroes: () => this.heroes.forEach((h, i) => { h.hp = HEROES[i].maxHp; h.energy = MAX_ENERGY; h.alive = true; }),
       project: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(this.camera); return { x: (v.x * 0.5 + 0.5) * window.innerWidth, y: (-v.y * 0.5 + 0.5) * window.innerHeight, behind: v.z > 1 }; },
-      onFinish: () => { this.tutWanted = false; },
+      onFinish: () => { this.tutWanted = false; setTimeout(() => this.tut.tip('vaelen'), 7500); },
     }, new TutorialUI(this.hud.centerTop, this.hud.root, { onSkip: () => this.tut.skip(), onDismiss: () => this.tut.dismissTip() }));
     this.input.onFirstGesture = () => sfx.unlock();
     this.input.onDeviceChange = (d) => this.hud.setHint(d);
@@ -124,6 +125,7 @@ export class Game {
     this.newRun(urlSeed ?? String(Math.floor(Math.random() * 1_000_000)));
     this.hud.toast('CONCORD OF THE VEIL', 3200);
     this.hud.setHint(this.input.device);
+    if (!this.tutWanted) setTimeout(() => this.tut.tip('vaelen'), 2500);
     // debugging / verification hook
     (window as unknown as { __game: Game }).__game = this;
   }
@@ -220,7 +222,7 @@ export class Game {
       dmg: boss ? 22 : kind === 'knight' ? 16 : 8, range: boss ? 3.5 : kind === 'knight' ? 2.7 : 1.9,
       radius: boss ? 0.95 : kind === 'knight' ? 0.6 : 0.5, height: anim.height * scale,
       tele: null, slam: false, attacks: 0, room, links: boss ? links : kind === 'knight' ? links.slice(0, 1) : [], dead: false, summons: 0,
-      bar, barHp, barPost, hitFlash: 0,
+      bar, barHp, barPost, hitFlash: 0, marks: 0,
     };
     root.userData.scale = scale;
     this.enemies.push(e);
@@ -300,6 +302,7 @@ export class Game {
     this.p.swapCd = 0.25; this.p.atk = null; this.p.comboIdx = 0; this.p.flurryT = 0; this.p.iframes = Math.max(this.p.iframes, 0.3);
     this.setHero(i);
     this.tut.emit('swap');
+    this.tut.tip(HEROES[i].id as 'vaelen' | 'seraphina' | 'kaelen');
   }
 
   private aimDir(frame: InputFrame, assist: boolean): { x: number; z: number } | null {
@@ -331,21 +334,93 @@ export class Game {
     }
   }
 
-  private tryAttack(frame: InputFrame): void {
+  private tryAttack(frame: InputFrame, dt: number): void {
+    if (this.def.ranged) { this.seraphinaAttack(frame, dt); return; }
     const wants = frame.attackPressed || frame.attackHeld;
     const a = this.p.atk;
     if (a) { if (frame.attackPressed && a.t > a.strike.dur * 0.4 && !a.special) this.p.buffered = 0.25; return; }
     if (!wants && this.p.buffered <= 0) return;
     this.p.buffered = 0;
-    if (this.def.ranged) {
-      if (this.p.boltCd > 0) return;
-      this.p.boltCd = 0.32;
-      this.startStrike(this.def.combo[0], false, frame);
+    // Vaelen: attacking right after a dash lunges into a Dash Strike
+    if (this.def.dashStrike && this.p.dashStrikeT > 0) {
+      this.p.dashStrikeT = 0; this.p.comboIdx = 0;
+      this.startStrike(this.def.dashStrike, false, frame);
+      this.fx.slashArc(this.p.x, this.p.z, this.p.yaw, 0xffffff, 3.4, 0.3);
+      this.say(this.p.x, 2.6, this.p.z, 'DASH STRIKE', 'info');
       return;
     }
     const idx = this.p.comboT > 0 ? this.p.comboIdx : 0;
     this.p.comboIdx = idx % this.def.combo.length;
-    this.startStrike(this.def.combo[this.p.comboIdx], false, frame);
+    const base = this.def.combo[this.p.comboIdx];
+    // Vaelen's combo accelerates with each link
+    const strike = this.def.id === 'vaelen' ? { ...base, dur: base.dur * (1 - 0.09 * this.p.comboIdx) } : base;
+    this.startStrike(strike, false, frame);
+  }
+
+  /** Seraphina: tap = arcane bolt (applies Unravel marks); hold = charge an Astral Lance. */
+  private seraphinaAttack(f: InputFrame, dt: number): void {
+    const p = this.p;
+    const fire = () => { if (p.boltCd > 0 || p.atk) return; p.boltCd = 0.3; this.startStrike(this.def.combo[0], false, f); };
+    if (f.attackPressed && !f.attackHeld) { p.charging = false; p.charge = 0; fire(); return; } // instant tap
+    if (f.attackPressed && f.attackHeld && !p.atk) { p.charging = true; p.charge = 0; p.chargePulse = 0; }
+    if (!p.charging) return;
+    if (f.attackHeld) {
+      p.charge += dt;
+      p.chargePulse -= dt;
+      if (p.charge > 0.25 && p.chargePulse <= 0) { p.chargePulse = 0.09; const a = Math.random() * 6.28; this.fx.burst(p.x + Math.cos(a) * 1.4, 1.1, p.z + Math.sin(a) * 1.4, 0xcaa8ff, 2, -3, 0.3, 7, 0); }
+      if (p.charge >= 0.9 && p.charge - dt < 0.9) { this.fx.shockwave(p.x, p.z, 0xcaa8ff, 2.2, 0.3); sfx.glyph(); this.say(p.x, 2.6, p.z, 'LANCE READY', 'harm'); }
+      return;
+    }
+    const charged = p.charge >= 0.9;
+    p.charging = false; p.charge = 0;
+    if (charged && this.hs.energy >= 15) { this.hs.energy -= 15; this.fireLance(f); } else fire();
+  }
+
+  private fireLance(f: InputFrame): void {
+    const p = this.p;
+    const dir = this.aimDir(f, true) ?? { x: Math.sin(p.yaw), z: Math.cos(p.yaw) };
+    p.yaw = Math.atan2(dir.x, dir.z);
+    p.atk = { strike: { dmg: 0, posture: 0, radius: 0, arc: 0, dur: 0.35, hitAt: 9, lunge: 0, kb: 0 }, special: true, t: 0, hit: true, yaw: p.yaw };
+    p.anims[p.hero].play('slash', 0.35);
+    const L = 15; let any = false;
+    for (const e of [...this.enemies]) {
+      if (e.dead || e.state === 'spawn') continue;
+      const rx = e.x - p.x, rz = e.z - p.z, along = rx * dir.x + rz * dir.z, perp = Math.abs(rx * dir.z - rz * dir.x);
+      if (along < 0 || along > L || perp > 1.0 + e.radius) continue;
+      this.hitEnemy(e, { dmg: 40, posture: 26, astral: true, dx: dir.x, dz: dir.z, kb: 3, finisher: false });
+      e.marks += 2; any = true; if (e.marks >= 3 && !e.dead) this.unravel(e);
+    }
+    for (const m of this.inst.monoliths) {
+      if (!m.alive) continue;
+      const rx = m.pos.x - p.x, rz = m.pos.z - p.z, along = rx * dir.x + rz * dir.z, perp = Math.abs(rx * dir.z - rz * dir.x);
+      if (along > 0 && along < L && perp < 1.2) { this.hitMonolith(m, 65, true); any = true; }
+    }
+    for (let d = 1; d <= L; d += 1) this.fx.burst(p.x + dir.x * d, 1.3, p.z + dir.z * d, d % 2 ? 0xcaa8ff : 0x5dffc0, 3, 3, 0.45, 8, 0);
+    this.fx.shockwave(p.x, p.z, 0xcaa8ff, 3, 0.4); this.fx.shockwave(p.x + dir.x * 3, p.z + dir.z * 3, 0x5dffc0, 4, 0.5);
+    sfx.arcane(); sfx.shatter(); this.addTrauma(0.5);
+    if (any) this.hitstop = Math.max(this.hitstop, 0.05);
+    this.say(p.x, 2.8, p.z, 'ASTRAL LANCE', 'harm');
+  }
+
+  /** Three Unravel marks detonate in an astral burst. */
+  private unravel(e: Enemy): void {
+    e.marks = 0;
+    this.fx.shockwave(e.x, e.z, 0xb36bff, 3.4, 0.45); this.fx.burst(e.x, e.height * 0.5, e.z, 0xb36bff, 24, 7, 0.6);
+    sfx.arcane(); this.addTrauma(0.25);
+    this.say(e.x, e.height + 1.1, e.z, 'UNRAVELED!', 'harm');
+    for (const o of [...this.enemies]) {
+      if (o.dead || o.state === 'spawn' || Math.hypot(o.x - e.x, o.z - e.z) > 2.8 + o.radius) continue;
+      this.hitEnemy(o, { dmg: 26, posture: 22, astral: true, dx: o.x - e.x, dz: o.z - e.z, kb: 3, finisher: false, quiet: true });
+    }
+  }
+
+  /** Vaelen's reward for dashing through a telegraphed strike. */
+  private astralStep(): void {
+    this.slow = 0.55; this.hs.energy = Math.min(MAX_ENERGY, this.hs.energy + 25);
+    this.p.crits = 3; this.p.dashCd = 0; this.p.dashStrikeT = 0.6;
+    this.fx.shockwave(this.p.x, this.p.z, 0x7fe8ff, 4, 0.5); this.fx.afterimage(this.p.x, this.p.z, this.p.yaw, 0x7fe8ff);
+    sfx.swap(); this.addTrauma(0.2);
+    this.say(this.p.x, 2.9, this.p.z, 'ASTRAL STEP!', 'parry');
   }
 
   private trySpecial(frame: InputFrame): void {
@@ -408,8 +483,11 @@ export class Game {
     if (this.p.dashCd > 0 || this.p.dashT > 0) return;
     let dx = frame.move.x, dz = frame.move.y;
     if (dx || dz) { const w = { x: S2 * (dx - dz), z: S2 * (-dx - dz) }, l = Math.hypot(w.x, w.z); dx = w.x / l; dz = w.z / l; } else { dx = Math.sin(this.p.yaw); dz = Math.cos(this.p.yaw); }
-    this.p.dashDir = { x: dx, z: dz }; this.p.dashT = 0.18; this.p.dashCd = 0.6; this.p.iframes = Math.max(this.p.iframes, 0.3);
-    this.p.atk = null; this.p.comboIdx = 0; this.p.yaw = Math.atan2(dx, dz); this.p.ghostT = 0;
+    const shield = this.def.id === 'kaelen'; // Shield Charge: super armor instead of i-frames
+    this.p.dashDir = { x: dx, z: dz }; this.p.dashT = shield ? 0.26 : 0.18; this.p.dashCd = shield ? 0.9 : 0.6;
+    if (!shield) { this.p.iframes = Math.max(this.p.iframes, 0.3); this.p.dashI = 0.26; }
+    this.p.dashHit.clear(); this.p.dashStrikeT = this.def.dashStrike ? 0.45 : 0;
+    this.p.atk = null; this.p.comboIdx = 0; this.p.yaw = Math.atan2(dx, dz); this.p.ghostT = 0; this.p.charging = false;
     this.tut.emit('dash');
     this.fx.burst(this.p.x, 0.3, this.p.z, 0xffffff, 8, 3, 0.35);
     sfx.dash();
@@ -417,8 +495,9 @@ export class Game {
 
   private tryParry(): void {
     if (this.p.parryCd > 0) return;
-    this.p.parryT = 0.35; this.p.parryCd = 0.55;
-    this.fx.shockwave(this.p.x, this.p.z, 0xbfe9ff, 1.8, 0.3);
+    const kael = this.def.id === 'kaelen';
+    this.p.parryT = kael ? 0.5 : 0.35; this.p.parryCd = kael ? 0.35 : 0.55;
+    this.fx.shockwave(this.p.x, this.p.z, kael ? 0x35e0ff : 0xbfe9ff, kael ? 2.4 : 1.8, 0.3);
     this.p.anims[this.p.hero].play('slash', 0.25);
     sfx.swing();
   }
@@ -453,7 +532,7 @@ export class Game {
     this.fx.burst(e.x, e.height * 0.6, e.z, 0xffd25a, 20, 7, 0.5);
   }
 
-  private hitEnemy(e: Enemy, o: { dmg: number; posture: number; astral: boolean; dx: number; dz: number; kb: number; finisher: boolean; quiet?: boolean }): void {
+  private hitEnemy(e: Enemy, o: { dmg: number; posture: number; astral: boolean; dx: number; dz: number; kb: number; finisher: boolean; quiet?: boolean; crit?: boolean }): void {
     if (e.dead || e.state === 'spawn') return;
     let dmg = o.dmg, post = o.posture;
     if (this.tetherCount(e) > 0 && !o.astral) { dmg *= PHYS_TETHER_FACTOR; post *= 0.3; }
@@ -461,7 +540,7 @@ export class Game {
     if (e.state === 'broken') {
       if (o.finisher) { dmg *= 3; label = 'FELLOWSHIP FINISHER! '; kind = 'crit'; e.state = 'recover'; e.t = 0; e.posture = 0; this.fx.shockwave(e.x, e.z, 0xffffff, 4, 0.5); HEROES.forEach((h, i) => this.fx.shockwave(e.x, e.z, h.color, 2.2 + i, 0.4 + i * 0.1)); sfx.detonate(); this.addTrauma(0.6); this.hitstop = Math.max(this.hitstop, 0.07); }
       else dmg *= 1.5;
-    } else if (Math.random() < 0.12) { dmg *= 1.6; label = 'CRIT! '; kind = 'crit'; }
+    } else if (o.crit || Math.random() < 0.12) { dmg *= 1.6; label = 'CRIT! '; kind = 'crit'; }
     e.hp -= dmg;
     e.hitFlash = 0.12;
     if (e.tut === 'effigy') this.tut.emit('hit');
@@ -502,14 +581,18 @@ export class Game {
   }
 
   private hurtPlayer(dmg: number, fromX: number, fromZ: number): void {
-    const hs = this.hs;
+    const hs = this.hs, kael = this.def.id === 'kaelen';
+    const armor = kael && (this.p.atk !== null || this.p.dashT > 0); // super armor: swings and charges can't be interrupted
+    if (kael) dmg *= 0.8;                                            // Fortitude
+    if (armor) dmg *= 0.7;
     if (this.tut.active) dmg = Math.min(dmg, 3);
     hs.hp -= dmg;
-    if (this.tut.active) hs.hp = Math.max(1, hs.hp); this.p.hurtT = 0.25; this.p.iframes = 0.5;
+    if (this.tut.active) hs.hp = Math.max(1, hs.hp);
+    this.p.hurtT = 0.25; this.p.iframes = armor ? 0.35 : 0.5; this.p.momentum = 0;
     const dx = this.p.x - fromX, dz = this.p.z - fromZ, d = Math.hypot(dx, dz) || 1;
-    this.p.ix += (dx / d) * 9; this.p.iz += (dz / d) * 9;
-    this.p.atk = null; this.p.anims[this.p.hero].play('hit', 0.3);
-    this.hud.hurtFlash(); sfx.hurt(); this.addTrauma(0.45);
+    if (!armor) { this.p.ix += (dx / d) * 9; this.p.iz += (dz / d) * 9; this.p.atk = null; this.p.anims[this.p.hero].play('hit', 0.3); }
+    else this.say(this.p.x, 3.1, this.p.z, 'SUPER ARMOR', 'info');
+    this.hud.hurtFlash(); sfx.hurt(); this.addTrauma(armor ? 0.25 : 0.45);
     this.say(this.p.x, 2.4, this.p.z, `-${Math.round(dmg)}`, 'hurt');
     this.fx.burst(this.p.x, 1, this.p.z, 0xff4060, 10, 5, 0.4);
     if (hs.hp <= 0) {
@@ -521,6 +604,15 @@ export class Game {
     }
   }
 
+  /** Chip damage taken through Kaelen's shield (no flinch). */
+  private hurtGuarded(dmg: number): void {
+    const hs = this.hs;
+    if (this.tut.active) dmg = Math.min(dmg, 1);
+    hs.hp = Math.max(this.tut.active ? 1 : 0, hs.hp - dmg * 0.8);
+    this.say(this.p.x, 2.2, this.p.z, `-${Math.round(dmg * 0.8)}`, 'hurt');
+    if (hs.hp <= 0) { hs.hp = 0; hs.alive = false; const next = this.heroes.findIndex((h) => h.alive); if (next >= 0) { this.p.swapCd = 0; this.swapHero(next); } else { this.gameOverT = 3.2; this.hud.toast('THE CONCORD FALLS', 3000); } }
+  }
+
   private perfectDeflect(e: Enemy): void {
     const mx = (this.p.x + e.x) / 2, mz = (this.p.z + e.z) / 2;
     sfx.parry(); this.fx.sparks(mx, 1.4, mz, 40); this.fx.shockwave(mx, mz, 0xffffff, 3.5, 0.4);
@@ -529,6 +621,7 @@ export class Game {
     this.breakEnemy(e, e.kind === 'boss' ? 3.2 : 3.6);
     this.hs.energy = Math.min(MAX_ENERGY, this.hs.energy + 20);
     this.p.parryT = 0;
+    if (this.def.id === 'kaelen') { this.p.counterT = 2.2; this.say(this.p.x, 3.3, this.p.z, 'RIPOSTE READY', 'info'); }
     this.tut.emit('deflect');
   }
 
@@ -546,13 +639,19 @@ export class Game {
   }
 
   private area(x: number, z: number, radius: number, yaw: number, arc: number, s: Strike, finisher: boolean, extraMono = 0): boolean {
-    const astral = this.astral;
+    const astral = this.astral, p = this.p, id = this.def.id;
+    const crit = id === 'vaelen' && p.crits > 0;
+    const rip = id === 'kaelen' && p.counterT > 0;
+    const dmgMul = (id === 'vaelen' ? 1 + 0.06 * p.momentum : 1) * (rip ? 1.6 : 1);
     let any = false;
     for (const e of this.enemiesIn(x, z, radius, yaw, arc)) {
       const dx = e.x - x, dz = e.z - z, d = Math.hypot(dx, dz) || 1;
-      this.hitEnemy(e, { dmg: s.dmg, posture: s.posture, astral, dx: dx / d, dz: dz / d, kb: s.kb, finisher });
+      this.hitEnemy(e, { dmg: s.dmg * dmgMul, posture: s.posture * (rip ? 2.2 : 1), astral, dx: dx / d, dz: dz / d, kb: s.kb * (rip ? 1.5 : 1), finisher, crit });
       any = true;
     }
+    if (any && id === 'vaelen' && p.momCd <= 0) { p.momCd = 0.12; p.momentum = Math.min(5, p.momentum + 1); p.momT = 4; }
+    if (any && crit) p.crits--;
+    if (any && rip) { p.counterT = 0; this.say(p.x, 2.8, p.z, 'RIPOSTE!', 'parry'); }
     for (const m of this.inst.monoliths) {
       if (!m.alive) continue;
       const dx = m.pos.x - x, dz = m.pos.z - z, d = Math.hypot(dx, dz);
@@ -592,13 +691,24 @@ export class Game {
     }
     if (s.finisher) this.tryDetonate(s.dmg);
     const any = this.area(this.p.x, this.p.z, s.radius, a.yaw, s.arc, s, !!s.finisher);
-    if (any) { this.hitstop = Math.max(this.hitstop, s.finisher ? 0.05 : 0.025); this.addTrauma(s.finisher ? 0.35 : 0.15); if (id === 'kaelen') sfx.slam(); else sfx.clash(s.finisher ? 1 : 0.6); this.fx.sparks(this.p.x + Math.sin(a.yaw) * s.radius * 0.7, 1.2, this.p.z + Math.cos(a.yaw) * s.radius * 0.7, s.finisher ? 22 : 10); }
+    const w = id === 'kaelen' ? 1.9 : id === 'vaelen' ? 0.8 : 1;
+    if (any) { this.hitstop = Math.max(this.hitstop, (s.finisher ? 0.05 : 0.025) * w); this.addTrauma((s.finisher ? 0.35 : 0.15) * w); if (id === 'kaelen') sfx.slam(); else sfx.clash(s.finisher ? 1 : 0.6); this.fx.sparks(this.p.x + Math.sin(a.yaw) * s.radius * 0.7, 1.2, this.p.z + Math.cos(a.yaw) * s.radius * 0.7, s.finisher ? 22 : 10); }
   }
 
   // ───────────────────────── per-frame simulation ─────────────────────────
-  private stepPlayer(dt: number, f: InputFrame): void {
+  private stepPlayer(dt: number, f0: InputFrame): void {
     const p = this.p, hs = this.hs, def = this.def;
-    for (const k of ['dashCd', 'parryT', 'parryCd', 'swapCd', 'boltCd', 'iframes', 'comboT', 'buffered', 'hurtT'] as const) p[k] = Math.max(0, p[k] - dt);
+    for (const k of ['dashCd', 'parryT', 'parryCd', 'swapCd', 'boltCd', 'iframes', 'comboT', 'buffered', 'hurtT', 'momCd', 'dashStrikeT', 'dashI', 'counterT', 'stunT'] as const) p[k] = Math.max(0, p[k] - dt);
+    let f = f0;
+    if (p.stunT > 0) f = { ...f0, move: { x: 0, y: 0 }, attackPressed: false, attackHeld: false, dashPressed: false, specialPressed: false, parryPressed: false, parryHeld: false };
+    if (p.momentum > 0 && (p.momT -= dt) <= 0) p.momentum = 0;
+    // Kaelen's shield guard: hold Parry
+    const wasGuard = p.guard;
+    p.guard = def.id === 'kaelen' && f.parryHeld && !p.atk && p.dashT <= 0 && p.flurryT <= 0;
+    if (p.guard) { p.guardT += dt; p.guardFx -= dt; if (p.guardFx <= 0) { p.guardFx = 0.16; this.fx.burst(p.x + Math.sin(p.yaw) * 1.2, 1.2, p.z + Math.cos(p.yaw) * 1.2, 0x35e0ff, 2, 2, 0.3, 8, 0); } }
+    else { p.guardT = 0; if (wasGuard) this.fx.shockwave(p.x, p.z, 0x35e0ff, 1.5, 0.2); }
+    if (!p.charging && def.id !== 'seraphina') p.charge = 0;
+    if (def.id !== 'seraphina') p.charging = false;
 
     if (f.swapTo >= 0) this.swapHero(f.swapTo);
     if (f.swapCycle) { for (let k = 1; k <= 3; k++) { const i = (p.hero + f.swapCycle * k + 9) % 3; if (this.heroes[i].alive) { this.swapHero(i); break; } } }
@@ -606,7 +716,7 @@ export class Game {
     if (f.parryPressed) this.tryParry();
     if (f.dashPressed) this.tryDash(f);
     if (f.specialPressed) this.trySpecial(f);
-    this.tryAttack(f);
+    this.tryAttack(f, dt);
 
     // movement
     let mx = f.move.x, mz = f.move.y;
@@ -615,8 +725,16 @@ export class Game {
     if (ml > 0.05) { const m = Math.min(1, ml); wx = S2 * (mx - mz) / ml * m; wz = S2 * (-mx - mz) / ml * m; }
     let vx = 0, vz = 0;
     if (p.dashT > 0) {
-      p.dashT -= dt; vx = p.dashDir.x * 24; vz = p.dashDir.z * 24;
+      p.dashT -= dt; const sp = def.id === 'kaelen' ? 18 : 24; vx = p.dashDir.x * sp; vz = p.dashDir.z * sp;
       p.ghostT -= dt; if (p.ghostT <= 0) { p.ghostT = 0.04; this.fx.afterimage(p.x, p.z, p.yaw, def.color); }
+      if (def.id === 'kaelen') {
+        for (const e of this.enemies) {
+          if (e.dead || e.state === 'spawn' || p.dashHit.has(e) || Math.hypot(e.x - p.x, e.z - p.z) > 1.4 + e.radius) continue;
+          p.dashHit.add(e);
+          this.hitEnemy(e, { dmg: 12, posture: 22, astral: this.astral, dx: p.dashDir.x, dz: p.dashDir.z, kb: 10, finisher: false });
+          this.fx.sparks(e.x, 1.2, e.z, 16); sfx.slam(); this.addTrauma(0.3); this.hitstop = Math.max(this.hitstop, 0.045);
+        }
+      }
     } else if (p.flurryT > 0) {
       p.flurryT -= dt; vx = p.dashDir.x * 15; vz = p.dashDir.z * 15;
       p.ghostT -= dt; if (p.ghostT <= 0) { p.ghostT = 0.035; this.fx.afterimage(p.x, p.z, p.yaw, def.color); }
@@ -629,9 +747,10 @@ export class Game {
       }
       if (p.flurryT <= 0) { this.dropGlyph(); this.fx.shockwave(p.x, p.z, def.glyphColor, 3, 0.35); }
     } else {
-      const mul = p.atk ? (p.atk.special ? 0.2 : 0.4) : 1;
+      const mul = (p.atk ? (p.atk.special ? 0.2 : 0.4) : 1) * (p.guard ? 0.45 : 1) * (p.charging && p.charge > 0.05 ? 0.5 : 1);
       vx = wx * def.speed * mul; vz = wz * def.speed * mul;
-      if (ml > 0.05 && !p.atk) p.yaw = lerpAngle(p.yaw, Math.atan2(wx, wz), 1 - Math.exp(-dt * 18));
+      if ((p.guard || p.charging) && !p.atk) { const d = this.aimDir(f, true); if (d) p.yaw = lerpAngle(p.yaw, Math.atan2(d.x, d.z), 1 - Math.exp(-dt * 16)); }
+      else if (ml > 0.05 && !p.atk) p.yaw = lerpAngle(p.yaw, Math.atan2(wx, wz), 1 - Math.exp(-dt * 18));
       else if (!p.atk && f.mouse) { const d = this.aimDir(f, false); if (d) p.yaw = lerpAngle(p.yaw, Math.atan2(d.x, d.z), 1 - Math.exp(-dt * 14)); }
       else if (!p.atk && f.aim) { const d = this.aimDir(f, false); if (d) p.yaw = lerpAngle(p.yaw, Math.atan2(d.x, d.z), 1 - Math.exp(-dt * 14)); }
     }
@@ -654,7 +773,7 @@ export class Game {
     // energy / realm upkeep
     for (let i = 0; i < 3; i++) { const h = this.heroes[i]; if (!h.alive) continue; if (i !== p.hero) h.energy = Math.min(MAX_ENERGY, h.energy + 9 * dt); }
     if (realm.isUnseenRealm) {
-      hs.energy = Math.max(0, hs.energy - 5 * dt);
+      hs.energy = Math.max(0, hs.energy - (def.id === 'seraphina' ? 2 : 5) * dt); // Veil-Weaver is at home in the Pale
       const onBridge = tileAt(this.dungeon, worldToTile(p.x), worldToTile(p.z)) === TileType.SPECTRAL_BRIDGE;
       if (hs.energy <= 0 && !onBridge) { realm.set(false); this.say(p.x, 2.6, p.z, 'THE VEIL CLOSES', 'info'); }
     } else hs.energy = Math.min(MAX_ENERGY, hs.energy + 6 * dt);
@@ -680,6 +799,7 @@ export class Game {
       for (const e of this.enemies) {
         if (e.dead || e.state === 'spawn' || b.hit.has(e) || Math.hypot(e.x - b.x, e.z - b.z) > e.radius + 0.35) continue;
         b.hit.add(e); this.hitEnemy(e, { dmg: this.def.combo[0].dmg, posture: 4, astral: true, dx: b.dx, dz: b.dz, kb: 1, finisher: false });
+        if (!e.dead) { e.marks++; if (e.marks >= 3) this.unravel(e); else this.say(e.x, e.height + 1.0, e.z, '◈'.repeat(e.marks), 'harm'); }
       }
       for (const m of this.inst.monoliths) {
         if (!m.alive || b.hit.has(m) || Math.hypot(m.pos.x - b.x, m.pos.z - b.z) > 0.9) continue;
@@ -756,8 +876,20 @@ export class Game {
     if (e.slam) { this.fx.shockwave(e.x, e.z, 0xff3050, 5.4, 0.45); this.addTrauma(0.35); sfx.slam(); }
     else sfx.swing();
     const reach = e.slam ? 5.2 : e.range + 0.5 + (e.kind === 'hound' ? 1.4 : 0);
+    if (this.p.dashI > 0 && dist <= reach + 4.5 && this.gameOverT < 0 && this.p.parryT <= 0) { this.say(this.p.x, 2.4, this.p.z, 'DODGE', 'info'); if (this.def.id === 'vaelen') this.astralStep(); return; }
     if (dist > reach || this.gameOverT >= 0) return;
     if (this.p.parryT > 0) { this.perfectDeflect(e); return; }
+    if (this.p.dashI > 0) { this.say(this.p.x, 2.4, this.p.z, 'DODGE', 'info'); if (this.def.id === 'vaelen') this.astralStep(); return; }
+    if (this.p.guard) {
+      const hs = this.hs;
+      if (hs.energy >= 8) {
+        hs.energy -= 8; this.fx.sparks(this.p.x + Math.sin(this.p.yaw), 1.3, this.p.z + Math.cos(this.p.yaw), 18); sfx.clash(0.8); this.addTrauma(0.2);
+        this.p.ix -= (dx / dist) * 3; this.p.iz -= (dz / dist) * 3;
+        this.say(this.p.x, 2.6, this.p.z, 'BLOCKED', 'parry');
+        this.hurtGuarded(e.dmg * 0.25);
+      } else { this.say(this.p.x, 2.8, this.p.z, 'GUARD BROKEN', 'hurt'); this.p.stunT = 0.8; this.p.guard = false; this.hurtPlayer(e.dmg, e.x, e.z); }
+      return;
+    }
     if (this.p.iframes > 0) { this.say(this.p.x, 2.4, this.p.z, 'DODGE', 'info'); return; }
     this.hurtPlayer(e.dmg, e.x, e.z);
   }
@@ -812,6 +944,16 @@ export class Game {
     };
   }
   private pending: InputFrame | null = null;
+
+  private heroMeter(): { label: string; v: number } | null {
+    const p = this.p;
+    switch (this.def.id) {
+      case 'vaelen': return p.crits > 0 ? { label: `ASTRAL CRITS ×${p.crits}`, v: p.crits / 3 } : { label: `MOMENTUM ${p.momentum}/5`, v: p.momentum / 5 };
+      case 'seraphina': return { label: p.charge >= 0.9 ? 'LANCE READY' : 'ASTRAL LANCE (HOLD)', v: p.charge / 0.9 };
+      case 'kaelen': return p.counterT > 0 ? { label: 'RIPOSTE READY', v: p.counterT / 2.2 } : { label: p.guard ? 'GUARDING' : 'GUARD (HOLD PARRY)', v: p.guard ? 1 : 0 };
+      default: return null;
+    }
+  }
 
   private bossHud(): BossHud | null {
     const room = this.currentRoom;
@@ -871,7 +1013,7 @@ export class Game {
     this.camera.lookAt(this.camPos.x + sx, 0, this.camPos.z + sz);
 
     this.hud.update(real, {
-      heroes: HEROES.map((h, i) => ({ name: h.name, title: h.title, color: h.css, hp: this.heroes[i].hp, maxHp: h.maxHp, energy: this.heroes[i].energy, maxEnergy: MAX_ENERGY, alive: this.heroes[i].alive })),
+      heroes: HEROES.map((h, i) => ({ meter: i === this.p.hero ? this.heroMeter() : null, name: h.name, title: h.title, color: h.css, hp: this.heroes[i].hp, maxHp: h.maxHp, energy: this.heroes[i].energy, maxEnergy: MAX_ENERGY, alive: this.heroes[i].alive })),
       active: this.p.hero, unseen: realm.isUnseenRealm, blend: realm.uRealmBlend, boss: this.bossHud(), seed: this.seed, floor: this.floor,
       device: this.input.device, gamepadName: this.input.gamepadName,
       minimap: { dungeon: this.dungeon, explored: this.explored, player: this.p, room: this.currentRoom, monoliths: this.inst.monoliths.map((m) => ({ pos: m.pos, alive: m.alive })), portalActive: this.portalActive },

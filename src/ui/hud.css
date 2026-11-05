@@ -110,3 +110,6 @@ kbd.k-touch { border-radius:999px; border:1.5px solid var(--gold); border-bottom
 #tut-arrow { position:fixed; left:0; top:0; display:none; flex-direction:column; align-items:center; gap:2px; margin:-22px 0 0 -22px; pointer-events:none; z-index:7; font-family:'Cinzel',Georgia,serif; font-size:10px; letter-spacing:.1em; color:var(--gold); text-shadow:0 0 6px #000; }
 #tut-arrow i { display:block; width:0; height:0; border-left:22px solid var(--gold); border-top:13px solid transparent; border-bottom:13px solid transparent; filter:drop-shadow(0 0 8px rgba(255,214,110,.9)); animation:arrowbob .8s ease-in-out infinite alternate; }
 @keyframes arrowbob { from { margin-left:-3px } to { margin-left:5px } }
+
+.card .mt { display:none; margin-top:4px; } .card .mt span { font-size:8px; letter-spacing:.1em; color:var(--c); display:block; line-height:1; margin-bottom:2px; white-space:nowrap; }
+.card .mt .bar { height:5px; margin:0; } .card .mt .bar > i { background:linear-gradient(90deg,var(--c),#fff); transition:transform .08s linear; }

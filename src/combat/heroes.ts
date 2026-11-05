@@ -9,7 +9,7 @@ export interface HeroDef {
   id: CharacterId; name: string; title: string;
   color: number; css: string; glyphColor: number; glyphName: string;
   maxHp: number; speed: number;
-  combo: Strike[]; ranged: boolean;
+  combo: Strike[]; ranged: boolean; dashStrike?: Strike;
   special: Strike & { name: string; cost: number; detBase: number };
 }
 
@@ -20,10 +20,12 @@ export const HEROES: HeroDef[] = [
     id: 'vaelen', name: 'VAELEN', title: 'ASTRAL BLADE-WARDEN', color: 0x7fe8ff, css: '#7fe8ff',
     glyphColor: 0xffc94a, glyphName: 'Solar Glyph', maxHp: 100, speed: 6.8, ranged: false,
     combo: [
-      { dmg: 14, posture: 6, radius: 2.6, arc: 130 * DEG, dur: 0.26, hitAt: 0.35, lunge: 0.9, kb: 2.5 },
-      { dmg: 15, posture: 6, radius: 2.6, arc: 130 * DEG, dur: 0.26, hitAt: 0.35, lunge: 0.9, kb: 2.5 },
-      { dmg: 24, posture: 14, radius: 3.1, arc: 200 * DEG, dur: 0.4, hitAt: 0.4, lunge: 1.6, kb: 5, finisher: true },
+      { dmg: 12, posture: 5, radius: 2.5, arc: 130 * DEG, dur: 0.26, hitAt: 0.35, lunge: 0.9, kb: 2.2 },
+      { dmg: 13, posture: 5, radius: 2.5, arc: 130 * DEG, dur: 0.26, hitAt: 0.35, lunge: 0.9, kb: 2.2 },
+      { dmg: 15, posture: 7, radius: 2.7, arc: 150 * DEG, dur: 0.26, hitAt: 0.35, lunge: 1.0, kb: 2.8 },
+      { dmg: 26, posture: 14, radius: 3.2, arc: 220 * DEG, dur: 0.4, hitAt: 0.4, lunge: 1.7, kb: 5.5, finisher: true },
     ],
+    dashStrike: { dmg: 24, posture: 14, radius: 3.2, arc: 150 * DEG, dur: 0.3, hitAt: 0.3, lunge: 2.6, kb: 5 },
     special: { name: 'Dash Flurry', cost: 30, detBase: 36, dmg: 11, posture: 6, radius: 2.5, arc: Math.PI * 2, dur: 0.34, hitAt: 0, lunge: 0, kb: 2 },
   },
   {

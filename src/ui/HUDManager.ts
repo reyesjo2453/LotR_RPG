@@ -1,7 +1,7 @@
 import './hud.css';
 import { GRID, TileType, type Dungeon, type Room, type Vec2 } from '../world/ProceduralDungeonGenerator';
 
-export interface HeroHud { name: string; title: string; color: string; hp: number; maxHp: number; energy: number; maxEnergy: number; alive: boolean }
+export interface HeroHud { meter?: { label: string; v: number } | null; name: string; title: string; color: string; hp: number; maxHp: number; energy: number; maxEnergy: number; alive: boolean }
 export interface BossHud { name: string; hp: number; maxHp: number; posture: number; maxPosture: number; tethers: number; maxTethers: number; broken: boolean }
 export interface MinimapData { dungeon: Dungeon; explored: Uint8Array; player: Vec2; room: Room | null; monoliths: Array<{ pos: Vec2; alive: boolean }>; portalActive: boolean }
 export interface HudState {
@@ -58,7 +58,7 @@ export class HUDManager {
     for (let i = 0; i < 3; i++) {
       const c = document.createElement('div');
       c.className = 'card glass';
-      c.innerHTML = `<span class="k">${i + 1}</span><div class="pt"><div class="av"></div><div class="nm"></div></div><div class="bar hp"><i></i></div><div class="bar en"><i></i></div>`;
+      c.innerHTML = `<span class="k">${i + 1}</span><div class="pt"><div class="av"></div><div class="nm"></div></div><div class="bar hp"><i></i></div><div class="bar en"><i></i></div><div class="mt"><span></span><div class="bar"><i></i></div></div>`;
       c.addEventListener('pointerdown', (e) => { e.preventDefault(); this.cb.onSwap(i); });
       cards.appendChild(c); this.cards.push(c);
     }
@@ -101,6 +101,9 @@ export class HUDManager {
       if (nm.dataset.n !== h.name) { nm.dataset.n = h.name; nm.innerHTML = `${h.name}<small>${h.title}</small>`; }
       (c.querySelector('.hp i') as HTMLElement).style.transform = `scaleX(${Math.max(0, h.hp / h.maxHp)})`;
       (c.querySelector('.en i') as HTMLElement).style.transform = `scaleX(${Math.max(0, h.energy / h.maxEnergy)})`;
+      const mt = c.querySelector('.mt') as HTMLElement;
+      mt.style.display = h.meter && i === s.active ? 'block' : 'none';
+      if (h.meter) { (mt.querySelector('span') as HTMLElement).textContent = h.meter.label; (mt.querySelector('i') as HTMLElement).style.transform = `scaleX(${Math.max(0, Math.min(1, h.meter.v))})`; }
     });
 
     if (s.boss) {

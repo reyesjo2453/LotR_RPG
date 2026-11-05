@@ -75,9 +75,14 @@ const STEPS: Step[] = [
     done: (_t, c) => c.onBridge && c.unseen },
 ];
 
-const TIPS: Record<string, { title: string; body: string; ttl: number }> = {
-  tether: { title: 'TETHERED ELITE', ttl: 16, body: 'Physical blows barely scratch it (<b>−85%</b>). Shift into the <b>Unseen Realm</b> or use <b>Seraphina</b>, then shatter the glowing <b>Runestone</b> to sever the tether.' },
-  break: { title: 'POSTURE BROKEN', ttl: 10, body: 'Finish it with a <b>Skill</b> or a heavy finisher for a <b>Fellowship Finisher</b> — triple damage.' },
+type TipId = 'tether' | 'break' | 'vaelen' | 'seraphina' | 'kaelen';
+const HERO_TIPS: TipId[] = ['vaelen', 'seraphina', 'kaelen'];
+const TIPS: Record<TipId, { title: string; body: (d: TutDevice) => string; ttl: number }> = {
+  tether: { title: 'TETHERED ELITE', ttl: 16, body: () => 'Physical blows barely scratch it (<b>−85%</b>). Shift into the <b>Unseen Realm</b> or use <b>Seraphina</b>, then shatter the glowing <b>Runestone</b> to sever the tether.' },
+  break: { title: 'POSTURE BROKEN', ttl: 10, body: () => 'Finish it with a <b>Skill</b> or a heavy finisher for a <b>Fellowship Finisher</b> — triple damage.' },
+  vaelen: { title: 'VAELEN · SPEED & MOMENTUM', ttl: 18, body: (d) => `Fastest Warden: a 4-hit combo that <b>speeds up</b>. Every hit builds <b>Momentum</b> (+damage). Attack right after a Dash for a <b>Dash Strike</b>. Dash <i>through</i> a telegraphed strike (${d === 'keyboard' ? '[[SPACE]]' : d === 'gamepad' ? '[[A]]' : '[[DASH]]'}) for an <b>Astral Step</b>: slow-mo, energy, and 3 guaranteed crits.` },
+  seraphina: { title: 'SERAPHINA · ARCANE CONTROL', ttl: 18, body: (d) => `Fight from range. <b>Tap</b> ${d === 'keyboard' ? '[[J]]' : d === 'gamepad' ? '[[X]]' : '[[ATTACK]]'} for bolts — three hits <b>Unravel</b> a foe. <b>Hold</b> to charge an <b>Astral Lance</b> that pierces everything and shatters runestones. Her magic is always astral, and the Pale barely drains her.` },
+  kaelen: { title: 'KAELEN · IMMOVABLE VANGUARD', ttl: 18, body: (d) => `Hold ${d === 'keyboard' ? '[[F]]' : d === 'gamepad' ? '[[B]]' : '[[PARRY]]'} to raise your <b>shield</b> (−75% damage; the first instant is a Perfect Deflection that primes a <b>Riposte</b>). His swings and <b>Shield Charge</b> dash have <b>super armor</b> — you won't be interrupted. Crush enemy posture.` },
 };
 
 export class Tutorial {
@@ -222,11 +227,11 @@ export class Tutorial {
   lastUnseen = false;
 
   // ── contextual field notes after the tutorial ──
-  tip(id: 'tether' | 'break'): void {
-    if (this.active || tutorialStatus() === 'skipped' || store.get(TIP_PREFIX + id) || this.tipId) return;
+  tip(id: TipId): void {
+    if (this.active || (tutorialStatus() === 'skipped' && !HERO_TIPS.includes(id)) || store.get(TIP_PREFIX + id) || this.tipId) return;
     store.set(TIP_PREFIX + id, '1');
     this.tipId = id;
-    this.ui.showTip(TIPS[id].title, chips(TIPS[id].body, this.device), TIPS[id].ttl);
+    this.ui.showTip(TIPS[id].title, chips(TIPS[id].body(this.device), this.device), TIPS[id].ttl);
     sfx.tutorialPrompt();
   }
   dismissTip(): void { if (this.tipId) { this.tipId = null; this.ui.hide(); } }

@@ -8,7 +8,7 @@ export interface InputFrame {
   aim: { x: number; y: number } | null;
   /** Mouse position in NDC when the keyboard/mouse is the active device. */
   mouse: { x: number; y: number } | null;
-  attackPressed: boolean; attackHeld: boolean;
+  attackPressed: boolean; attackHeld: boolean; parryHeld: boolean;
   dashPressed: boolean; specialPressed: boolean; parryPressed: boolean;
   realmPressed: boolean; newSeedPressed: boolean;
   /** 0..2 = direct hero swap, -1 = none */
@@ -30,7 +30,7 @@ export class InputManager {
   private mouse = { x: 0, y: 0, has: false, down: false, right: false };
   private mousePressedAttack = false;
   private mousePressedSpecial = false;
-  private touch = { move: { x: 0, y: 0 }, attackHeld: false, edges: new Set<string>(), swap: -1 };
+  private touch = { move: { x: 0, y: 0 }, attackHeld: false, parryHeld: false, edges: new Set<string>(), swap: -1 };
   private padPrev: boolean[] = [];
   private touchRoot: HTMLElement;
   private stickBase!: HTMLElement;
@@ -126,8 +126,9 @@ export class InputManager {
         this.setDevice('touch'); this.onFirstGesture();
         this.touch.edges.add(act);
         if (act === 'attack') this.touch.attackHeld = true;
+        if (act === 'parry') this.touch.parryHeld = true;
       });
-      const up = () => { b.classList.remove('down'); if (act === 'attack') this.touch.attackHeld = false; };
+      const up = () => { b.classList.remove('down'); if (act === 'attack') this.touch.attackHeld = false; if (act === 'parry') this.touch.parryHeld = false; };
       b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
     });
     return root;
@@ -141,7 +142,7 @@ export class InputManager {
   poll(): InputFrame {
     const f: InputFrame = {
       move: { x: 0, y: 0 }, aim: null, mouse: null,
-      attackPressed: false, attackHeld: false, dashPressed: false, specialPressed: false, parryPressed: false,
+      attackPressed: false, attackHeld: false, parryHeld: false, dashPressed: false, specialPressed: false, parryPressed: false,
       realmPressed: false, newSeedPressed: false, swapTo: -1, swapCycle: 0,
     };
     const key = (c: string) => this.keys.has(c);
@@ -157,6 +158,7 @@ export class InputManager {
     f.specialPressed = this.mousePressedSpecial || hit('KeyK');
     f.dashPressed = hit('Space');
     f.parryPressed = hit('KeyF', 'KeyE');
+    f.parryHeld = key('KeyF') || key('KeyE');
     f.realmPressed = hit('Tab', 'ShiftLeft', 'ShiftRight');
     f.newSeedPressed = hit('KeyR');
     if (hit('Digit1')) f.swapTo = 0; else if (hit('Digit2')) f.swapTo = 1; else if (hit('Digit3')) f.swapTo = 2;
@@ -165,7 +167,7 @@ export class InputManager {
     // touch
     if (this.device === 'touch' || this.touch.edges.size || this.touch.swap >= 0 || this.touch.move.x || this.touch.move.y) {
       if (this.touch.move.x || this.touch.move.y) { f.move.x = this.touch.move.x; f.move.y = this.touch.move.y; }
-      f.attackHeld ||= this.touch.attackHeld;
+      f.attackHeld ||= this.touch.attackHeld; f.parryHeld ||= this.touch.parryHeld;
       const e = this.touch.edges;
       f.attackPressed ||= e.has('attack'); f.dashPressed ||= e.has('dash'); f.specialPressed ||= e.has('special');
       f.parryPressed ||= e.has('parry'); f.realmPressed ||= e.has('realm'); f.newSeedPressed ||= e.has('newseed');
@@ -196,7 +198,7 @@ export class InputManager {
       if (lx || ly) { const m = Math.min(1, Math.hypot(lx, ly)); const a = Math.atan2(ly, lx); f.move.x = Math.cos(a) * m; f.move.y = -Math.sin(a) * m; }
       if (rx || ry) f.aim = { x: rx, y: -ry };
       f.dashPressed ||= edge(0);
-      f.parryPressed ||= edge(1);
+      f.parryPressed ||= edge(1); f.parryHeld ||= !!down[1];
       f.attackPressed ||= edge(2); f.attackHeld ||= !!down[2];
       f.specialPressed ||= edge(3);
       if (edge(4)) f.swapCycle = -1; if (edge(5)) f.swapCycle = 1;
