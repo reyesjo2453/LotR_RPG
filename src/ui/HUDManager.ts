@@ -22,7 +22,10 @@ export class HUDManager {
   private toastTimer = 0;
   private floats = 0;
 
-  constructor(parent: HTMLElement, private cb: { onSwap(i: number): void; onNewSeed(): void }) {
+  readonly centerTop!: HTMLElement;
+  readonly root!: HTMLElement;
+
+  constructor(parent: HTMLElement, private cb: { onSwap(i: number): void; onNewSeed(): void; onTutorial(): void }) {
     this.el = document.createElement('div');
     this.el.id = 'hud';
     this.el.innerHTML = `
@@ -34,6 +37,7 @@ export class HUDManager {
       </div>
       <div id="top-right">
         <button id="seed-btn" class="glass">NEW SEED / FLOOR</button>
+        <button id="tut-btn" class="glass">REPLAY TUTORIAL</button>
         <div id="seed-info"></div>
         <div id="pad-badge" class="glass"></div>
       </div>
@@ -46,6 +50,8 @@ export class HUDManager {
     this.mmImg = document.createElement('canvas'); this.mmImg.width = this.mmImg.height = GRID; this.mmImgCtx = this.mmImg.getContext('2d')!;
     this.banner = q('#realm-banner'); this.boss = q('#boss'); this.toastEl = q('#toast'); this.hint = q('#hint');
     this.padBadge = q('#pad-badge'); this.seedInfo = q('#seed-info'); this.vig = q('#vignette');
+    (this as { centerTop: HTMLElement }).centerTop = q('#center-top'); (this as { root: HTMLElement }).root = this.el;
+    q('#tut-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); this.cb.onTutorial(); });
     const btn = q('#seed-btn');
     btn.addEventListener('pointerdown', (e) => { e.preventDefault(); this.cb.onNewSeed(); });
     const cards = q('#cards');

@@ -8,6 +8,8 @@ import { sfx } from './audio/SoundFX';
 import { InputManager, type InputFrame } from './input/InputManager';
 import { sharedUniforms, VeilRippleOverlay } from './shaders/ToonRealm';
 import { HUDManager, type BossHud, type FloatKind } from './ui/HUDManager';
+import { Tutorial } from './tutorial/Tutorial';
+import { TutorialUI } from './ui/TutorialUI';
 import { DungeonInstancer, type MonolithRef } from './world/DungeonInstancer';
 import { generateDungeon, GRID, roomAt, tileAt, TileType, walkable, worldToTile, type Dungeon, type Room } from './world/ProceduralDungeonGenerator';
 import { realm } from './world/RealmManager';
@@ -24,6 +26,7 @@ interface Enemy {
   tele: Telegraph | null; slam: boolean; attacks: number;
   room: Room; links: MonolithRef[]; dead: boolean; summons: number;
   bar: THREE.Group; barHp: THREE.Mesh; barPost: THREE.Mesh; hitFlash: number;
+  tut?: 'effigy' | 'shade';
 }
 interface Bolt { mesh: THREE.Mesh; x: number; z: number; dx: number; dz: number; life: number; hit: Set<Enemy | MonolithRef> }
 interface Atk { strike: Strike; special: boolean; t: number; hit: boolean; yaw: number }
@@ -48,6 +51,10 @@ export class Game {
   private overlay = new VeilRippleOverlay();
   private fx = new FX();
   private hud: HUDManager;
+  private tut!: Tutorial;
+  private tutWanted = Tutorial.shouldRun();
+  private tutRestart = false;
+  private tutTarget: Enemy | null = null;
   private input: InputManager;
   private inst!: DungeonInstancer;
   private dungeon!: Dungeon;
@@ -92,10 +99,20 @@ export class Game {
     this.scene.add(this.hemi, this.sun, this.fx.group, this.enemyLayer, this.p.root);
 
     this.input = new InputManager(canvas);
-    this.hud = new HUDManager(uiRoot, { onSwap: (i) => this.input.requestSwap(i), onNewSeed: () => this.input.requestNewSeed() });
+    this.hud = new HUDManager(uiRoot, { onSwap: (i) => this.input.requestSwap(i), onNewSeed: () => this.input.requestNewSeed(), onTutorial: () => this.restartTutorial() });
+    this.tut = new Tutorial({
+      scene: this.scene,
+      spawnTarget: (k) => this.spawnTutorialTarget(k),
+      clearTargets: () => this.clearTutorialTargets(),
+      targetPos: () => (this.tutTarget && !this.tutTarget.dead ? { x: this.tutTarget.x, z: this.tutTarget.z } : null),
+      refillEnergy: () => this.heroes.forEach((h) => { h.energy = MAX_ENERGY; }),
+      restoreHeroes: () => this.heroes.forEach((h, i) => { h.hp = HEROES[i].maxHp; h.energy = MAX_ENERGY; h.alive = true; }),
+      project: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(this.camera); return { x: (v.x * 0.5 + 0.5) * window.innerWidth, y: (-v.y * 0.5 + 0.5) * window.innerHeight, behind: v.z > 1 }; },
+      onFinish: () => { this.tutWanted = false; },
+    }, new TutorialUI(this.hud.centerTop, this.hud.root, { onSkip: () => this.tut.skip(), onDismiss: () => this.tut.dismissTip() }));
     this.input.onFirstGesture = () => sfx.unlock();
     this.input.onDeviceChange = (d) => this.hud.setHint(d);
-    realm.onShift((u) => { sfx.realmShift(u); this.addTrauma(0.35); this.fx.shockwave(this.p.x, this.p.z, u ? 0x5dffc0 : 0xffc94a, 14, 0.8); });
+    realm.onShift((u) => { this.tut.lastUnseen = u; this.tut.emit('realm'); sfx.realmShift(u); this.addTrauma(0.35); this.fx.shockwave(this.p.x, this.p.z, u ? 0x5dffc0 : 0xffc94a, 14, 0.8); });
 
     // player rigs: all three exist, only the active one is visible
     HEROES.forEach((h, i) => { const a = assets.createCharacter(h.id as CharacterId); a.root.visible = i === 0; this.p.root.add(a.root); this.p.anims.push(a); });
@@ -155,9 +172,24 @@ export class Game {
     this.p.x = this.dungeon.spawn.x; this.p.z = this.dungeon.spawn.z; this.p.ix = this.p.iz = 0;
     this.p.atk = null; this.p.comboIdx = 0; this.p.dashT = 0; this.p.flurryT = 0; this.p.iframes = 1;
     this.camPos.set(this.p.x, 0, this.p.z);
-    this.hud.toast(`FLOOR ${this.floor} · THE SUNKEN CONCORD`, 2400);
+    this.tutTarget = null;
+    if (this.tutWanted && this.floor === 1) { this.tut.begin(this.dungeon, this.tutRestart || !this.tut.active); this.tutRestart = false; }
+    else this.hud.toast(`FLOOR ${this.floor} · THE SUNKEN CONCORD`, 2400);
     sfx.portal();
   }
+
+  private restartTutorial(): void { this.tutWanted = true; this.tutRestart = true; this.rollSeed(); }
+
+  private spawnTutorialTarget(kind: 'effigy' | 'shade'): void {
+    if (this.tutTarget && !this.tutTarget.dead) return;
+    const room = this.dungeon.rooms[0];
+    const e = this.spawnEnemy('knight', room.center.x + 3.6, room.center.z, room);
+    e.tut = kind; e.links = []; e.hp = e.maxHp = 99999;
+    if (kind === 'effigy') { e.name = 'HOLLOW EFFIGY'; e.cd = 1e9; e.speed = 0; e.maxPosture = 1e9; }
+    else { e.name = 'SPARRING SHADE'; e.dmg = 2; e.cd = 1.4; e.speed = 2.2; }
+    this.tutTarget = e;
+  }
+  private clearTutorialTargets(): void { for (const e of this.enemies) if (e.tut && !e.dead) this.removeEnemy(e); this.tutTarget = null; }
 
   private nextFloor(): void { this.floor++; this.newRun(String(Math.floor(Math.random() * 1_000_000)), true); }
   private rollSeed(): void { this.floor = 1; this.heroes = []; this.newRun(String(Math.floor(Math.random() * 1_000_000))); }
@@ -265,6 +297,7 @@ export class Game {
     if (i === this.p.hero || !this.heroes[i]?.alive || this.p.swapCd > 0 || this.gameOverT >= 0) return;
     this.p.swapCd = 0.25; this.p.atk = null; this.p.comboIdx = 0; this.p.flurryT = 0; this.p.iframes = Math.max(this.p.iframes, 0.3);
     this.setHero(i);
+    this.tut.emit('swap');
   }
 
   private aimDir(frame: InputFrame, assist: boolean): { x: number; z: number } | null {
@@ -341,7 +374,7 @@ export class Game {
     const d = this.def;
     this.fx.addGlyph(this.p.x, this.p.z, d.glyphColor, this.p.hero);
     this.fx.burst(this.p.x, 0.3, this.p.z, d.glyphColor, 14, 3.5, 0.6);
-    sfx.glyph();
+    sfx.glyph(); this.tut.emit('glyph');
     this.say(this.p.x, 2.6, this.p.z, d.glyphName.toUpperCase(), 'info');
   }
 
@@ -365,6 +398,7 @@ export class Game {
     this.hitstop = Math.max(this.hitstop, 0.06); this.addTrauma(0.85);
     sfx.detonate();
     this.say(gx, 2.9, gz, 'HARMONIC DETONATION!', 'harm');
+    this.tut.emit('detonate');
     return true;
   }
 
@@ -374,6 +408,7 @@ export class Game {
     if (dx || dz) { const w = { x: S2 * (dx - dz), z: S2 * (-dx - dz) }, l = Math.hypot(w.x, w.z); dx = w.x / l; dz = w.z / l; } else { dx = Math.sin(this.p.yaw); dz = Math.cos(this.p.yaw); }
     this.p.dashDir = { x: dx, z: dz }; this.p.dashT = 0.18; this.p.dashCd = 0.6; this.p.iframes = Math.max(this.p.iframes, 0.3);
     this.p.atk = null; this.p.comboIdx = 0; this.p.yaw = Math.atan2(dx, dz); this.p.ghostT = 0;
+    this.tut.emit('dash');
     this.fx.burst(this.p.x, 0.3, this.p.z, 0xffffff, 8, 3, 0.35);
     sfx.dash();
   }
@@ -403,7 +438,7 @@ export class Game {
     this.inst.shatterMonolith(m.index);
     this.fx.shockwave(m.pos.x, m.pos.z, 0x5dffc0, 5, 0.6); this.fx.burst(m.pos.x, y, m.pos.z, 0x5dffc0, 36, 9, 0.8); this.fx.burst(m.pos.x, y, m.pos.z, 0x8a5cff, 20, 7, 0.8);
     sfx.shatter(); this.addTrauma(0.5); this.hitstop = Math.max(this.hitstop, 0.05);
-    this.say(m.pos.x, 3.4, m.pos.z, 'TETHER SEVERED!', 'sever');
+    this.say(m.pos.x, 3.4, m.pos.z, 'TETHER SEVERED!', 'sever'); this.tut.emit('sever');
     for (const e of this.enemies) if (!e.dead && e.links.includes(m)) this.breakEnemy(e, this.tetherCount(e) === 0 ? 3.4 : 1.4, false);
   }
 
@@ -412,7 +447,7 @@ export class Game {
     this.fx.releaseTelegraph(e.tele); e.tele = null;
     e.state = 'broken'; e.t = 0; e.brokenDur = dur; e.posture = e.maxPosture;
     e.anim.play('hit', 0.4);
-    if (announce) { this.say(e.x, e.height + 0.8, e.z, 'BREAK!', 'break'); sfx.breakSfx(); this.addTrauma(0.3); }
+    if (announce) { this.say(e.x, e.height + 0.8, e.z, 'BREAK!', 'break'); sfx.breakSfx(); this.addTrauma(0.3); if (!e.tut) this.tut.tip('break'); }
     this.fx.burst(e.x, e.height * 0.6, e.z, 0xffd25a, 20, 7, 0.5);
   }
 
@@ -427,6 +462,7 @@ export class Game {
     } else if (Math.random() < 0.12) { dmg *= 1.6; label = 'CRIT! '; kind = 'crit'; }
     e.hp -= dmg;
     e.hitFlash = 0.12;
+    if (e.tut === 'effigy') this.tut.emit('hit');
     e.kx += o.dx * o.kb * (e.kind === 'boss' ? 0.3 : e.kind === 'knight' ? 0.7 : 1.2); e.kz += o.dz * o.kb * (e.kind === 'boss' ? 0.3 : e.kind === 'knight' ? 0.7 : 1.2);
     this.fx.burst(e.x, e.height * 0.55, e.z, o.astral ? 0xc6a0ff : 0xfff0c0, 8, 6, 0.35);
     if (!o.quiet) { sfx.hit(); if (o.finisher || o.kb > 5) sfx.clash(1); }
@@ -465,7 +501,9 @@ export class Game {
 
   private hurtPlayer(dmg: number, fromX: number, fromZ: number): void {
     const hs = this.hs;
-    hs.hp -= dmg; this.p.hurtT = 0.25; this.p.iframes = 0.5;
+    if (this.tut.active) dmg = Math.min(dmg, 3);
+    hs.hp -= dmg;
+    if (this.tut.active) hs.hp = Math.max(1, hs.hp); this.p.hurtT = 0.25; this.p.iframes = 0.5;
     const dx = this.p.x - fromX, dz = this.p.z - fromZ, d = Math.hypot(dx, dz) || 1;
     this.p.ix += (dx / d) * 9; this.p.iz += (dz / d) * 9;
     this.p.atk = null; this.p.anims[this.p.hero].play('hit', 0.3);
@@ -489,6 +527,7 @@ export class Game {
     this.breakEnemy(e, e.kind === 'boss' ? 3.2 : 3.6);
     this.hs.energy = Math.min(MAX_ENERGY, this.hs.energy + 20);
     this.p.parryT = 0;
+    this.tut.emit('deflect');
   }
 
   // ───────────────────────── strike resolution ─────────────────────────
@@ -710,7 +749,7 @@ export class Game {
     this.fx.releaseTelegraph(e.tele); e.tele = null;
     e.anim.play('slash', 0.3);
     e.attacks++;
-    e.state = 'recover'; e.t = 0; e.cd = (e.kind === 'hound' ? 0.5 : 1.0) + Math.random() * 0.6;
+    e.state = 'recover'; e.t = 0; e.cd = e.tut === 'shade' ? 2.4 : (e.kind === 'hound' ? 0.5 : 1.0) + Math.random() * 0.6;
     if (e.kind === 'hound') { e.kx += (dx / dist) * 11; e.kz += (dz / dist) * 11; }
     if (e.slam) { this.fx.shockwave(e.x, e.z, 0xff3050, 5.4, 0.45); this.addTrauma(0.35); sfx.slam(); }
     else sfx.swing();
@@ -726,7 +765,7 @@ export class Game {
     this.currentRoom = room;
     if (room && room.kind !== 'start') {
       let run = this.runs.get(room.id);
-      if (!run) { run = { entered: true, wave: 1, cleared: false }; this.runs.set(room.id, run); this.spawnWave(room, 1); }
+      if (!run) { run = { entered: true, wave: 1, cleared: false }; this.runs.set(room.id, run); this.spawnWave(room, 1); if (room.kind === 'combat') this.tut.tip('tether'); }
     }
     for (const [id, run] of this.runs) {
       if (run.cleared) continue;
@@ -814,6 +853,10 @@ export class Game {
       this.drawTethers();
       this.fx.update(dt);
     } else this.pending = f;
+    this.tut.update({
+      dt: real, x: this.p.x, z: this.p.z, device: this.input.device, unseen: realm.isUnseenRealm,
+      onBridge: tileAt(this.dungeon, worldToTile(this.p.x), worldToTile(this.p.z)) === TileType.SPECTRAL_BRIDGE, glyphs: this.fx.activeGlyphs.length,
+    });
     this.updateEnvironment();
     this.inst.update(real, this.p);
 

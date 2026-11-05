@@ -151,6 +151,23 @@ export class SoundFX {
     for (const [i, f] of [392, 494, 587, 784].entries()) this.tone('sine', f, f, t + i * 0.1, 0.02, 1.2, 0.12);
   }
 
+  tutorialPrompt(): void {
+    if (!this.ok('tp', 0.2)) return;
+    const t = this.ctx!.currentTime;
+    this.tone('sine', 660, 660, t, 0.01, 0.35, 0.09); this.tone('sine', 990, 990, t + 0.07, 0.01, 0.4, 0.07);
+  }
+  tutorialStep(): void {
+    if (!this.ok('ts', 0.2)) return;
+    const t = this.ctx!.currentTime;
+    for (const [i, f] of [523, 659, 784].entries()) { this.tone('triangle', f, f, t + i * 0.07, 0.008, 0.5, 0.13); this.tone('sine', f * 2, f * 2, t + i * 0.07, 0.008, 0.4, 0.05); }
+  }
+  tutorialDone(): void {
+    if (!this.ok('td', 0.5)) return;
+    const t = this.ctx!.currentTime;
+    for (const [i, f] of [392, 494, 587, 784, 988].entries()) { this.tone('triangle', f, f, t + i * 0.1, 0.01, 1.4, 0.13); this.tone('sine', f / 2, f / 2, t + i * 0.1, 0.01, 1.6, 0.1); }
+    this.noise(t, 0.9, 0.06, 'highpass', 6000, 3000);
+  }
+
   /** Persistent sub-bass drone; opens up in the Unseen Realm. */
   private startDrone(): void {
     const c = this.ctx!;
