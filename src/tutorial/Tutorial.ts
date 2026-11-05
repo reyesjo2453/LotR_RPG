@@ -151,11 +151,12 @@ export class Tutorial {
     this.count = 0; this.stepTime = 0; this.transitioning = false;
     const s = this.step;
     s.enter?.(this);
-    this.lastBody = '';
-    this.ui.showStep(this.i, STEPS.length, s.title, s.flavor, '', !!s.need);
+    const html = chips(s.text(this.device, { dt: 0, x: 0, z: 0, device: this.device, unseen: false, onBridge: false, glyphs: this.glyphsNow }), this.device);
+    this.lastBody = html;
+    this.ui.showStep(this.i, STEPS.length, s.title, s.flavor, html, !!s.need);
     if (!first) sfx.tutorialPrompt();
-    this.render({ dt: 0, x: 0, z: 0, device: this.device, unseen: false, onBridge: false, glyphs: 0 }, true);
   }
+  private glyphsNow = 0;
 
   private render(c: TutCtx, force = false): void {
     const html = chips(this.step.text(this.device, c), this.device);
@@ -235,7 +236,7 @@ export class Tutorial {
     this.beamMat.uniforms.uT.value = this.time;
     if (c.device !== this.device) { this.device = c.device; if (this.active) this.render(c, true); }
     if (!this.active) return;
-    this.stepTime += c.dt;
+    this.stepTime += c.dt; this.glyphsNow = c.glyphs;
     if (this.lastPos) { const d = Math.hypot(c.x - this.lastPos.x, c.z - this.lastPos.z); if (d < 3) this.moved += d; }
     this.lastPos = { x: c.x, z: c.z };
     if (this.step.id === 'move') this.progress();

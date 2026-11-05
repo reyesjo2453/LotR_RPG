@@ -178,6 +178,8 @@ export class Game {
     sfx.portal();
   }
 
+  realmUnseen(): boolean { return realm.isUnseenRealm; }
+
   private restartTutorial(): void { this.tutWanted = true; this.tutRestart = true; this.rollSeed(); }
 
   private spawnTutorialTarget(kind: 'effigy' | 'shade'): void {

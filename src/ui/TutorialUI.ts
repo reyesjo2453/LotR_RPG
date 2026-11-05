@@ -47,10 +47,12 @@ export class TutorialUI {
   }
 
   showStep(i: number, total: number, title: string, flavor: string, body: string, needs: boolean): void {
+    // gsap leaves inline styles on the check badge; clear them so the next step starts clean
     this.cancelTip();
     const swap = this.el.style.display !== 'none';
     const apply = () => {
       this.el.classList.remove('done');
+      gsap.set(this.q('.tut-check'), { clearProps: 'all' });
       this.fill(title, flavor, body, `STEP ${i + 1} / ${total}`, 'SKIP ✕', total, i, false);
       this.q('.tut-prog').style.display = needs ? 'flex' : 'none';
       this.setProgress(0, '');
