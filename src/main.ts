@@ -1,27 +1,15 @@
-import * as THREE from 'three';
-import { gsap } from 'gsap';
+import { assets } from './assets/AssetRegistry';
+import { Game } from './Game';
 
-const canvas = document.getElementById('game') as HTMLCanvasElement;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x07060a);
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
-camera.position.set(0, 2, 5);
-
-const cube = new THREE.Mesh(
-  new THREE.IcosahedronGeometry(1, 0),
-  new THREE.MeshStandardMaterial({ color: 0x6b5bd6, flatShading: true }),
-);
-scene.add(cube, new THREE.HemisphereLight(0xaaaaff, 0x221122, 1.2));
-gsap.to(cube.rotation, { y: Math.PI * 2, duration: 8, repeat: -1, ease: 'none' });
-
-function resize() {
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
+async function boot(): Promise<void> {
+  const canvas = document.getElementById('game') as HTMLCanvasElement;
+  const root = document.getElementById('ui') as HTMLElement;
+  // Probe public/assets for generated .glb files; anything missing is covered by the procedural fallback.
+  await assets.init();
+  if (assets.loaded.length) console.info('[assets] loaded', assets.loaded.join(', '));
+  else console.info('[assets] no .glb files found, using procedural fallbacks');
+  const game = new Game(canvas, root);
+  game.start();
 }
-window.addEventListener('resize', resize);
-resize();
-renderer.setAnimationLoop(() => renderer.render(scene, camera));
+
+void boot();
