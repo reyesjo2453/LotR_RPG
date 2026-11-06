@@ -118,6 +118,7 @@ export class Game {
     // player rigs: all three exist, only the active one is visible
     HEROES.forEach((h, i) => { const a = assets.createCharacter(h.id as CharacterId); a.root.visible = i === 0; this.p.root.add(a.root); this.p.anims.push(a); });
     this.resize();
+    this.initZoomControls();
     window.addEventListener('resize', () => this.resize());
     window.visualViewport?.addEventListener('resize', () => this.resize());
 
@@ -131,6 +132,35 @@ export class Game {
   }
 
   // ───────────────────────── display ─────────────────────────
+  /** Camera zoom multiplier on the view width: <1 closer, >1 farther. Persisted per device. */
+  private zoom = (() => { try { const v = Number(localStorage.getItem('cotv.zoom')); return v >= 0.5 && v <= 1.8 ? v : 1; } catch { return 1; } })();
+  setZoom(z: number): void {
+    this.zoom = Math.min(1.8, Math.max(0.5, z));
+    try { localStorage.setItem('cotv.zoom', String(this.zoom)); } catch { /* ignore */ }
+    this.resize();
+  }
+  private initZoomControls(): void {
+    const bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;right:calc(10px + env(safe-area-inset-right,0px));top:50%;transform:translateY(-50%);z-index:20;display:flex;flex-direction:column;gap:8px';
+    for (const [label, f] of [['+', 0.85], ['−', 1 / 0.85]] as const) {
+      const b = document.createElement('button');
+      b.textContent = label; b.setAttribute('aria-label', f < 1 ? 'Zoom in' : 'Zoom out');
+      b.style.cssText = 'width:44px;height:44px;border-radius:12px;border:1px solid rgba(220,200,140,.45);background:rgba(15,12,30,.55);color:#e8d9a8;font:600 22px Georgia,serif;touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent';
+      b.addEventListener('click', () => this.setZoom(this.zoom * f));
+      bar.appendChild(b);
+    }
+    document.body.appendChild(bar);
+    window.addEventListener('wheel', (e) => { e.preventDefault(); this.setZoom(this.zoom * Math.exp(e.deltaY * 0.0012)); }, { passive: false });
+    window.addEventListener('keydown', (e) => { if (e.key === '=' || e.key === '+') this.setZoom(this.zoom * 0.9); else if (e.key === '-' || e.key === '_') this.setZoom(this.zoom / 0.9); });
+    // two-finger pinch anywhere that isn't the stick or a button
+    let d0 = 0, z0 = 1;
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const free = (t: TouchList) => [...Array.from(t)].every((x) => !(x.target as HTMLElement).closest?.('#stick-zone, button, .card'));
+    window.addEventListener('touchstart', (e) => { if (e.touches.length === 2 && free(e.touches)) { d0 = dist(e.touches); z0 = this.zoom; } else d0 = 0; }, { passive: true });
+    window.addEventListener('touchmove', (e) => { if (d0 > 0 && e.touches.length === 2) this.setZoom(z0 * (d0 / Math.max(1, dist(e.touches)))); }, { passive: true });
+    window.addEventListener('touchend', () => { d0 = 0; }, { passive: true });
+  }
+
   resize(): void {
     const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
     const pr = Math.min(window.devicePixelRatio || 1, 2.0);
@@ -138,7 +168,7 @@ export class Game {
     this.renderer.setSize(w, h, false);
     this.fx.setPixelRatio(pr); this.inst?.setPixelRatio(pr);
     // Frame ≥20 world-units across and ≥14 down so folded cover (10:16), unfolded tablet (4:3) and landscape all fit.
-    const halfW = Math.max(6.4, 4.2 * aspect), halfH = halfW / aspect;
+    const halfW = Math.max(6.4, 4.2 * aspect) * this.zoom, halfH = halfW / aspect;
     const shift = aspect < 1 ? 0.14 : 0.04; // keep the hero clear of the bottom thumb zones
     this.camera.left = -halfW; this.camera.right = halfW;
     this.camera.top = halfH * (1 - shift); this.camera.bottom = -halfH * (1 + shift);
