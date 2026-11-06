@@ -30,8 +30,9 @@ for (const [suffix, label] of Object.entries(CLIPS)) {
 }
 
 // ---- base model: first file that actually carries a skinned mesh ----
-let baseDone = false;
+let baseDone = !!process.env.CLIPS_ONLY; // CLIPS_ONLY=1: leave <name>.glb untouched, regenerate clips only
 for (const [suffix, file] of Object.entries(glbs)) {
+  if (process.env.CLIPS_ONLY) break;
   const doc = await io.read(file);
   if (!doc.getRoot().listMeshes().length) continue;
   for (const a of doc.getRoot().listAnimations()) a.dispose();
@@ -61,18 +62,21 @@ for (const [suffix, file] of Object.entries(glbs)) {
   console.log(`${name}.${suffix}.glb  ${dur.toFixed(2)}s`);
 }
 
-/** Keep keyframes in [t0,t1] (linearly clamped at the edges) and shift to start at 0. */
+/** Keep keyframes in [t0,t1] (linearly clamped at the edges) and shift to start at 0. Every sampler gets its own new accessors
+ *  (the originals are shared between samplers, so rewriting them in place corrupts the other channels). */
 function trim(anim, t0, t1) {
-  for (const s of anim.listSamplers()) {
-    const T = s.getInput().getArray(), V = s.getOutput(), stride = V.getElementSize(), arr = V.getArray();
+  const jobs = anim.listSamplers().map((s) => ({ s, T: Float32Array.from(s.getInput().getArray()), V: s.getOutput(), arr: Float32Array.from(s.getOutput().getArray()), stride: s.getOutput().getElementSize() }));
+  for (const { s, T, V, arr, stride } of jobs) {
     const times = [], vals = [];
-    const sample = (t, k) => { // linear sample (quats lerp+normalise is fine at this key density)
+    const sample = (t, k) => {
       let i = 0; while (i < T.length - 2 && T[i + 1] < t) i++;
       const u = Math.min(1, Math.max(0, (t - T[i]) / Math.max(1e-6, T[i + 1] - T[i])));
       return arr[i * stride + k] * (1 - u) + arr[(i + 1) * stride + k] * u;
     };
     const push = (t) => { times.push(t - t0); const row = []; for (let k = 0; k < stride; k++) row.push(sample(t, k)); if (stride === 4) { const n = Math.hypot(...row) || 1; row.forEach((x, k) => (row[k] = x / n)); } vals.push(...row); };
     push(t0); for (const t of T) if (t > t0 && t < t1) push(t); push(t1);
-    s.getInput().setArray(new Float32Array(times)); V.setArray(new Float32Array(vals));
+    const inAcc = s.getInput().clone().setArray(new Float32Array(times));
+    const outAcc = V.clone().setArray(new Float32Array(vals));
+    s.setInput(inAcc).setOutput(outAcc);
   }
 }
