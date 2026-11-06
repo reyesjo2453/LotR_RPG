@@ -138,7 +138,7 @@ export class Game {
     this.renderer.setSize(w, h, false);
     this.fx.setPixelRatio(pr); this.inst?.setPixelRatio(pr);
     // Frame ≥20 world-units across and ≥14 down so folded cover (10:16), unfolded tablet (4:3) and landscape all fit.
-    const halfW = Math.max(9, 6 * aspect), halfH = halfW / aspect;
+    const halfW = Math.max(6.4, 4.2 * aspect), halfH = halfW / aspect;
     const shift = aspect < 1 ? 0.14 : 0.04; // keep the hero clear of the bottom thumb zones
     this.camera.left = -halfW; this.camera.right = halfW;
     this.camera.top = halfH * (1 - shift); this.camera.bottom = -halfH * (1 + shift);
