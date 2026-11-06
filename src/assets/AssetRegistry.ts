@@ -59,11 +59,9 @@ class MixerAnimator implements Animator {
     this.height = TARGET_HEIGHT[id];
     this.mixer = new THREE.AnimationMixer(model);
     for (const [name, srcClip] of Object.entries(asset.clips)) {
-      // lock hips horizontal travel (in place) so slashes/runs don't drag the model off its root
+      // rotation-only: clip translations come from a differently-scaled skeleton and would collapse the rig into the floor
       const clip = srcClip.clone();
-      for (const tr of clip.tracks) {
-        if (/hips\.position$/i.test(tr.name)) { const v = tr.values; for (let i = 3; i < v.length; i += 3) { v[i] = v[0]; v[i + 2] = v[2]; } }
-      }
+      clip.tracks = clip.tracks.filter((tr) => !/\.(position|scale)$/.test(tr.name));
       const a = this.mixer.clipAction(clip);
       if (name === 'idle' || name === 'run') a.setLoop(THREE.LoopRepeat, Infinity);
       else { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
