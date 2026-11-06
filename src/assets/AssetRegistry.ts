@@ -14,6 +14,23 @@ const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runes
 const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit', 'combo', 'stab', 'dodge'] as const;
 const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8, kaelen: 1.55, castellan_knight: 2.7, barrow_hound: 1.05 };
 
+/** Mixamo clips are long loops (idle lead-in/out): keep only the active part, in seconds. */
+const CLIP_WINDOW: Partial<Record<string, [number, number]>> = { combo: [0.35, 1.25], stab: [0.3, 1.1], dodge: [0.4, 1.0] };
+const MAX_SHOT_SPEED = 2.6; // never play a one-shot faster than this; let it run slightly past the gameplay window instead
+
+/** Keep [t0,t1] of a clip, shifted to start at 0. Edges are interpolated so tracks without a key inside the window keep their pose. */
+function trimClip(clip: THREE.AnimationClip, name: string, t0: number, t1: number): THREE.AnimationClip {
+  const end = Math.min(t1, clip.duration);
+  const tracks = clip.tracks.map((tr) => {
+    const stride = tr.getValueSize(), it = (tr as unknown as { createInterpolant(): { evaluate(t: number): ArrayLike<number> } }).createInterpolant();
+    const times: number[] = [], values: number[] = [];
+    const add = (t: number) => { times.push(t - t0); const v = it.evaluate(t); for (let k = 0; k < stride; k++) values.push(v[k]); };
+    add(t0); for (const t of tr.times) if (t > t0 + 1e-4 && t < end - 1e-4) add(t); add(end);
+    return new (tr.constructor as new (n: string, t: number[], v: number[]) => THREE.KeyframeTrack)(tr.name, times, values);
+  });
+  return new THREE.AnimationClip(name, end - t0, tracks);
+}
+
 interface CharacterAsset { scene: THREE.Group; clips: Record<string, THREE.AnimationClip> }
 
 /** Merge every mesh of a prop into one vertex-coloured geometry so it can be drawn as a single InstancedMesh. */
@@ -67,7 +84,9 @@ class MixerAnimator implements Animator {
     this.mixer = new THREE.AnimationMixer(model);
     for (const [name, srcClip] of Object.entries(asset.clips)) {
       // rotation-only: clip translations come from a differently-scaled skeleton and would collapse the rig into the floor
-      const clip = srcClip.clone();
+      let clip = srcClip.clone();
+      const win = CLIP_WINDOW[name];
+      if (win) clip = trimClip(clip, name, win[0], win[1]);
       clip.tracks = clip.tracks.filter((tr) => !/\.(position|scale)$/.test(tr.name) && !/Hand(Thumb|Index|Middle|Ring|Pinky)\d\./.test(tr.name));
       const a = this.mixer.clipAction(clip);
       if (name === 'idle' || name === 'run') a.setLoop(THREE.LoopRepeat, Infinity);
@@ -97,8 +116,10 @@ class MixerAnimator implements Animator {
   play(state: OneShot, duration?: number): void {
     const a = this.actions[state] ?? (state === 'combo' || state === 'stab' ? this.actions.slash : undefined);
     if (!a) return;
-    this.shotTime = duration ?? a.getClip().duration;
-    a.setEffectiveTimeScale(a.getClip().duration / this.shotTime);
+    const cd = a.getClip().duration;
+    const speed = Math.min(MAX_SHOT_SPEED, cd / (duration ?? cd));
+    this.shotTime = cd / speed;
+    a.setEffectiveTimeScale(speed);
     if (a === this.current) a.reset().play(); // retrigger (combo) instead of staying clamped at the end
     else this.fadeTo(a, 0.05);
   }
