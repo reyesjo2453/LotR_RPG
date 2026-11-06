@@ -92,6 +92,68 @@ class MixerAnimator implements Animator {
   }
 }
 
+/** Rigless imported mesh (e.g. image-to-3D output): animated with whole-body procedural motion. */
+class StaticModelAnimator implements Animator {
+  readonly root = new THREE.Group();
+  readonly height: number;
+  private body = new THREE.Group();
+  private t = Math.random() * 10;
+  private phase = 0;
+  private speed = 0;
+  private shot: { state: OneShot; time: number; dur: number } | null = null;
+  private cur = { rx: 0, ry: 0, rz: 0, y: 0, z: 0, sy: 1 };
+
+  constructor(asset: CharacterAsset, id: CharacterId) {
+    const model = cloneSkinned(asset.scene) as THREE.Group;
+    toonifyObject(model);
+    const box = new THREE.Box3().setFromObject(model);
+    const h = Math.max(0.01, box.max.y - box.min.y);
+    const s = TARGET_HEIGHT[id] / h;
+    model.scale.multiplyScalar(s);
+    model.position.set(-(box.min.x + box.max.x) / 2 * s, -box.min.y * s, -(box.min.z + box.max.z) / 2 * s);
+    this.body.add(model);
+    this.root.add(this.body);
+    this.height = TARGET_HEIGHT[id];
+  }
+  setMoveSpeed(v: number): void { this.speed = v; }
+  play(state: OneShot, duration = state === 'slash' ? 0.35 : 0.3): void { this.shot = { state, time: 0, dur: duration }; }
+
+  update(dt: number): void {
+    this.t += dt;
+    const sp = Math.min(1, this.speed / 6);
+    this.phase += dt * (6 + sp * 6) * (sp > 0.05 ? 1 : 0);
+    const tgt = { rx: 0, ry: 0, rz: 0, y: 0, z: 0, sy: 1 };
+    let fast = 14;
+    if (this.shot) {
+      this.shot.time += dt;
+      const u = this.shot.time / this.shot.dur;
+      if (u >= 1) this.shot = null;
+      else {
+        fast = 36;
+        if (this.shot.state === 'slash') {
+          // wind-up (0..0.3) then lunge and twist through the target
+          if (u < 0.3) { const w = u / 0.3; tgt.rx = -0.22 * w; tgt.ry = 0.7 * w; tgt.z = -0.12 * w; tgt.sy = 1 + 0.03 * w; }
+          else { const w = Math.sin(Math.min(1, (u - 0.3) / 0.7) * Math.PI * 0.85); tgt.rx = 0.4 * w; tgt.ry = 0.7 - 1.6 * Math.min(1, (u - 0.3) / 0.35); tgt.z = 0.3 * w; tgt.sy = 1 - 0.04 * w; }
+        } else { const h = 1 - u; tgt.rx = -0.4 * h; tgt.rz = 0.15 * h; tgt.z = -0.18 * h; tgt.sy = 1 + 0.08 * h; }
+      }
+    }
+    if (!this.shot) {
+      const b = Math.sin(this.t * 2.2), sw = Math.sin(this.phase);
+      tgt.y = Math.abs(sw) * 0.12 * sp + b * 0.01 * (1 - sp);
+      tgt.rx = 0.2 * sp + 0.015 * b;
+      tgt.rz = sw * 0.09 * sp + Math.sin(this.t * 1.1) * 0.015 * (1 - sp);
+      tgt.ry = sw * 0.12 * sp + Math.sin(this.t * 0.7) * 0.04 * (1 - sp);
+      tgt.sy = 1 + 0.012 * b * (1 - sp) - Math.abs(Math.cos(this.phase)) * 0.03 * sp;
+    }
+    const k = 1 - Math.exp(-dt * fast), c = this.cur;
+    c.rx += (tgt.rx - c.rx) * k; c.ry += (tgt.ry - c.ry) * k; c.rz += (tgt.rz - c.rz) * k;
+    c.y += (tgt.y - c.y) * k; c.z += (tgt.z - c.z) * k; c.sy += (tgt.sy - c.sy) * k;
+    this.body.rotation.set(c.rx, c.ry, c.rz);
+    this.body.position.set(0, c.y, c.z);
+    this.body.scale.set(1 / Math.sqrt(c.sy), c.sy, 1 / Math.sqrt(c.sy));
+  }
+}
+
 class AssetRegistry {
   private loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   private chars = new Map<CharacterId, CharacterAsset>();
@@ -149,7 +211,8 @@ class AssetRegistry {
   /** New animated actor. Uses the .glb + AnimationMixer when present, otherwise the procedural rig. */
   createCharacter(id: CharacterId): Animator {
     const asset = this.chars.get(id);
-    return asset ? new MixerAnimator(asset, id) : new ProceduralAnimator(id);
+    if (!asset) return new ProceduralAnimator(id);
+    return Object.keys(asset.clips).length ? new MixerAnimator(asset, id) : new StaticModelAnimator(asset, id);
   }
 
   /** Single merged vertex-coloured geometry for InstancedMesh use (cached). */
