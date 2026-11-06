@@ -55,21 +55,31 @@ class MixerAnimator implements Animator {
     const model = cloneSkinned(asset.scene) as THREE.Group;
     toonifyObject(model);
     model.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; });
-    const box = new THREE.Box3().setFromObject(model);
-    const h = Math.max(1e-6, box.max.y - box.min.y);
-    const s = TARGET_HEIGHT[id] / h;
-    model.scale.multiplyScalar(s);
-    model.position.y -= box.min.y * s;
     this.root.add(model);
     this.height = TARGET_HEIGHT[id];
     this.mixer = new THREE.AnimationMixer(model);
-    for (const [name, clip] of Object.entries(asset.clips)) {
+    for (const [name, srcClip] of Object.entries(asset.clips)) {
+      // lock hips horizontal travel (in place) so slashes/runs don't drag the model off its root
+      const clip = srcClip.clone();
+      for (const tr of clip.tracks) {
+        if (/hips\.position$/i.test(tr.name)) { const v = tr.values; for (let i = 3; i < v.length; i += 3) { v[i] = v[0]; v[i + 2] = v[2]; } }
+      }
       const a = this.mixer.clipAction(clip);
       if (name === 'idle' || name === 'run') a.setLoop(THREE.LoopRepeat, Infinity);
       else { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
       this.actions[name as 'idle'] = a;
     }
     this.fadeTo(this.actions.idle ?? null);
+    // fit using the posed (idle) skeleton, not the bind pose, so the feet sit on the ground
+    this.mixer.update(0);
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model, true);
+    const h = Math.max(1e-6, box.max.y - box.min.y);
+    const s = TARGET_HEIGHT[id] / h;
+    model.scale.multiplyScalar(s);
+    model.position.y -= box.min.y * s;
+    model.position.x -= (box.min.x + box.max.x) / 2 * s;
+    model.position.z -= (box.min.z + box.max.z) / 2 * s;
   }
 
   private fadeTo(a: THREE.AnimationAction | null, t = 0.12): void {
@@ -84,7 +94,8 @@ class MixerAnimator implements Animator {
     if (!a) return;
     this.shotTime = duration ?? a.getClip().duration;
     a.setEffectiveTimeScale(a.getClip().duration / this.shotTime);
-    this.fadeTo(a, 0.05);
+    if (a === this.current) a.reset().play(); // retrigger (combo) instead of staying clamped at the end
+    else this.fadeTo(a, 0.05);
   }
   update(dt: number): void {
     this.mixer.update(dt);

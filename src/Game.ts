@@ -36,7 +36,7 @@ interface RoomRun { entered: boolean; wave: number; cleared: boolean }
 const MAX_ENERGY = 100;
 const PHYS_TETHER_FACTOR = 0.15; // 85% reduced physical damage
 const CAM_OFFSET = (() => {
-  const pitch = 38 * Math.PI / 180, yaw = 45 * Math.PI / 180, d = 40;
+  const pitch = 30 * Math.PI / 180, yaw = 45 * Math.PI / 180, d = 40;
   return new THREE.Vector3(Math.cos(pitch) * Math.sin(yaw) * d, Math.sin(pitch) * d, Math.cos(pitch) * Math.cos(yaw) * d);
 })();
 const S2 = Math.SQRT1_2;
