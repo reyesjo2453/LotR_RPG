@@ -56,11 +56,11 @@ class MixerAnimator implements Animator {
     toonifyObject(model, 0.45);
     model.traverse((o) => {
       if ((o as THREE.SkinnedMesh).isSkinnedMesh) o.frustumCulled = false;
-      // closed fists around the grips (the Mixamo clips animate open hands), held blades angled out of the fist
+      // closed fists around the grips (the Mixamo clips animate open hands), held grip crosses the palm
       const f = /Hand(Thumb|Index|Middle|Ring|Pinky)\d$/.exec(o.name);
-      if (f) o.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), f[1] === 'Thumb' ? 0 : 1.05));
+      if (f) o.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), f[1] === 'Thumb' ? 0 : 1.22));
       const w = /^sword_(Left|Right)Hand$/.exec(o.name);
-      if (w) { o.position.set(0, 0.03, 0); o.quaternion.setFromEuler(new THREE.Euler(0, 0, (w[1] === 'Left' ? 1 : -1) * 40 * Math.PI / 180)); }
+      if (w) { o.position.set(0, 0.03, 0); o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(w[1] === 'Left' ? -1 : 1, 0, 0)); }
     });
     this.root.add(model);
     this.height = TARGET_HEIGHT[id];
