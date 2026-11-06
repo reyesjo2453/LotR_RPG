@@ -11,7 +11,7 @@ import { toonifyObject } from '../shaders/ToonRealm';
 
 const CHARACTERS: CharacterId[] = ['vaelen', 'seraphina', 'kaelen', 'castellan_knight', 'barrow_hound'];
 const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runestone_monolith', 'bridge_broken', 'archway_gate'];
-const CLIP_SUFFIXES = ['run', 'slash', 'hit'] as const;
+const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit'] as const;
 const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8, kaelen: 1.55, castellan_knight: 2.7, barrow_hound: 1.05 };
 
 interface CharacterAsset { scene: THREE.Group; clips: Record<string, THREE.AnimationClip> }
@@ -54,8 +54,9 @@ class MixerAnimator implements Animator {
   constructor(asset: CharacterAsset, id: CharacterId) {
     const model = cloneSkinned(asset.scene) as THREE.Group;
     toonifyObject(model);
+    model.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; });
     const box = new THREE.Box3().setFromObject(model);
-    const h = Math.max(0.01, box.max.y - box.min.y);
+    const h = Math.max(1e-6, box.max.y - box.min.y);
     const s = TARGET_HEIGHT[id] / h;
     model.scale.multiplyScalar(s);
     model.position.y -= box.min.y * s;
