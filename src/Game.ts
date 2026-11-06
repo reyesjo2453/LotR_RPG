@@ -356,7 +356,7 @@ export class Game {
     const dir = this.aimDir(frame, true) ?? { x: Math.sin(this.p.yaw), z: Math.cos(this.p.yaw) };
     this.p.yaw = Math.atan2(dir.x, dir.z);
     this.p.atk = { strike, special, t: 0, hit: false, yaw: this.p.yaw };
-    this.p.anims[this.p.hero].play('slash', strike.dur);
+    this.p.anims[this.p.hero].play(strike === this.def.dashStrike ? 'stab' : 'slash', strike.dur);
     if (strike.lunge) { const k = 14; this.p.ix = dir.x * strike.lunge * k; this.p.iz = dir.z * strike.lunge * k; }
     if (!special && !this.def.ranged) {
       this.fx.slashArc(this.p.x, this.p.z, this.p.yaw, this.def.color, strike.radius * 0.98, strike.dur * 1.25);
@@ -467,7 +467,7 @@ export class Game {
     if (this.def.id === 'vaelen') {
       this.p.flurryT = sp.dur; this.p.flurryTick = 0; this.p.iframes = Math.max(this.p.iframes, sp.dur + 0.08);
       this.p.dashDir = dir; this.p.atk = null;
-      this.p.anims[0].play('slash', sp.dur);
+      this.p.anims[0].play('combo', sp.dur);
       sfx.dash(); sfx.clash(0.7);
       return;
     }
@@ -516,6 +516,7 @@ export class Game {
     const shield = this.def.id === 'kaelen'; // Shield Charge: super armor instead of i-frames
     this.p.dashDir = { x: dx, z: dz }; this.p.dashT = shield ? 0.26 : 0.18; this.p.dashCd = shield ? 0.9 : 0.6;
     if (!shield) { this.p.iframes = Math.max(this.p.iframes, 0.3); this.p.dashI = 0.26; }
+    if (!shield) this.p.anims[this.p.hero].play('dodge', 0.3);
     this.p.dashHit.clear(); this.p.dashStrikeT = this.def.dashStrike ? 0.45 : 0;
     this.p.atk = null; this.p.comboIdx = 0; this.p.yaw = Math.atan2(dx, dz); this.p.ghostT = 0; this.p.charging = false;
     this.tut.emit('dash');

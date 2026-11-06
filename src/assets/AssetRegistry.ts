@@ -11,7 +11,7 @@ import { toonifyObject } from '../shaders/ToonRealm';
 
 const CHARACTERS: CharacterId[] = ['vaelen', 'seraphina', 'kaelen', 'castellan_knight', 'barrow_hound'];
 const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runestone_monolith', 'bridge_broken', 'archway_gate'];
-const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit'] as const;
+const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit', 'combo', 'stab', 'dodge'] as const;
 const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8, kaelen: 1.55, castellan_knight: 2.7, barrow_hound: 1.05 };
 
 interface CharacterAsset { scene: THREE.Group; clips: Record<string, THREE.AnimationClip> }
@@ -95,7 +95,7 @@ class MixerAnimator implements Animator {
   }
   setMoveSpeed(v: number): void { this.speed = v; }
   play(state: OneShot, duration?: number): void {
-    const a = this.actions[state];
+    const a = this.actions[state] ?? (state === 'combo' || state === 'stab' ? this.actions.slash : undefined);
     if (!a) return;
     this.shotTime = duration ?? a.getClip().duration;
     a.setEffectiveTimeScale(a.getClip().duration / this.shotTime);
@@ -133,7 +133,10 @@ class StaticModelAnimator implements Animator {
     this.height = TARGET_HEIGHT[id];
   }
   setMoveSpeed(v: number): void { this.speed = v; }
-  play(state: OneShot, duration = state === 'slash' ? 0.35 : 0.3): void { this.shot = { state, time: 0, dur: duration }; }
+  play(state: OneShot, duration = state === 'slash' ? 0.35 : 0.3): void {
+    if (state === 'dodge') return;
+    this.shot = { state: state === 'combo' || state === 'stab' ? 'slash' : state, time: 0, dur: duration };
+  }
 
   update(dt: number): void {
     this.t += dt;
