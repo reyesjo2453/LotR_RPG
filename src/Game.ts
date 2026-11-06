@@ -356,7 +356,7 @@ export class Game {
     const dir = this.aimDir(frame, true) ?? { x: Math.sin(this.p.yaw), z: Math.cos(this.p.yaw) };
     this.p.yaw = Math.atan2(dir.x, dir.z);
     this.p.atk = { strike, special, t: 0, hit: false, yaw: this.p.yaw };
-    this.p.anims[this.p.hero].play(strike === this.def.dashStrike ? 'stab' : 'slash', strike.dur);
+    this.p.anims[this.p.hero].play(strike === this.def.dashStrike ? 'stab' : special || this.def.ranged ? 'slash' : (`swing${(this.p.comboIdx % 4) + 1}` as 'swing1'), strike.dur);
     if (strike.lunge) { const k = 14; this.p.ix = dir.x * strike.lunge * k; this.p.iz = dir.z * strike.lunge * k; }
     if (!special && !this.def.ranged) {
       this.fx.slashArc(this.p.x, this.p.z, this.p.yaw, this.def.color, strike.radius * 0.98, strike.dur * 1.25);

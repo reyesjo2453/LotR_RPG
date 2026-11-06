@@ -16,6 +16,8 @@ const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8
 
 /** Mixamo clips are long loops (idle lead-in/out): keep only the active part, in seconds. */
 const CLIP_WINDOW: Partial<Record<string, [number, number]>> = { combo: [0.35, 1.25], stab: [0.3, 1.1], dodge: [0.4, 1.0] };
+/** Different swings cut from the long Mixamo dual-weapon combo, used for hits 1-4 of the attack chain. */
+const SWING_WINDOWS: [number, number][] = [[0.3, 1.0], [1.2, 1.9], [1.9, 2.5], [2.5, 3.2]];
 const MAX_SHOT_SPEED = 2.6; // never play a one-shot faster than this; let it run slightly past the gameplay window instead
 
 /** Keep [t0,t1] of a clip, shifted to start at 0. Edges are interpolated so tracks without a key inside the window keep their pose. */
@@ -82,7 +84,10 @@ class MixerAnimator implements Animator {
     this.root.add(model);
     this.height = TARGET_HEIGHT[id];
     this.mixer = new THREE.AnimationMixer(model);
-    for (const [name, srcClip] of Object.entries(asset.clips)) {
+    const entries: [string, THREE.AnimationClip][] = Object.entries(asset.clips);
+    const comboSrc = asset.clips.combo;
+    if (comboSrc) SWING_WINDOWS.forEach((w, i) => entries.push([`swing${i + 1}`, trimClip(comboSrc.clone(), `swing${i + 1}`, w[0], w[1])]));
+    for (const [name, srcClip] of entries) {
       // rotation-only: clip translations come from a differently-scaled skeleton and would collapse the rig into the floor
       let clip = srcClip.clone();
       const win = CLIP_WINDOW[name];
@@ -114,7 +119,7 @@ class MixerAnimator implements Animator {
   }
   setMoveSpeed(v: number): void { this.speed = v; }
   play(state: OneShot, duration?: number): void {
-    const a = this.actions[state] ?? (state === 'combo' || state === 'stab' ? this.actions.slash : undefined);
+    const a = this.actions[state] ?? (state === 'combo' || state === 'stab' || state.startsWith('swing') ? this.actions.slash : undefined);
     if (!a) return;
     const cd = a.getClip().duration;
     const speed = Math.min(MAX_SHOT_SPEED, cd / (duration ?? cd));
@@ -156,7 +161,7 @@ class StaticModelAnimator implements Animator {
   setMoveSpeed(v: number): void { this.speed = v; }
   play(state: OneShot, duration = state === 'slash' ? 0.35 : 0.3): void {
     if (state === 'dodge') return;
-    this.shot = { state: state === 'combo' || state === 'stab' ? 'slash' : state, time: 0, dur: duration };
+    this.shot = { state: state === 'combo' || state === 'stab' || state.startsWith('swing') ? 'slash' : state, time: 0, dur: duration };
   }
 
   update(dt: number): void {

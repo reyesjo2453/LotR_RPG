@@ -3,7 +3,7 @@ import { createToonMaterial } from '../shaders/ToonRealm';
 
 export type CharacterId = 'vaelen' | 'seraphina' | 'kaelen' | 'castellan_knight' | 'barrow_hound';
 export type EnvPropId = 'pillar_elven' | 'wall_segment' | 'brazier_iron' | 'runestone_monolith' | 'bridge_broken' | 'archway_gate';
-export type OneShot = 'slash' | 'hit' | 'combo' | 'stab' | 'dodge';
+export type OneShot = 'slash' | 'hit' | 'combo' | 'stab' | 'dodge' | 'swing1' | 'swing2' | 'swing3' | 'swing4';
 
 /** Unified animation controller: procedural rigs and GLB mixers both implement this. */
 export interface Animator {
@@ -219,7 +219,7 @@ export class ProceduralAnimator implements Animator {
 
   play(state: OneShot, duration = state === 'slash' ? 0.35 : 0.3): void {
     if (state === 'dodge') return; // no procedural dodge pose
-    if (state === 'combo' || state === 'stab') state = 'slash';
+    if (state === 'combo' || state === 'stab' || state.startsWith('swing')) state = 'slash';
     this.shot = { state, time: 0, dur: duration };
     if (state === 'hit') this.punch = 1;
   }
