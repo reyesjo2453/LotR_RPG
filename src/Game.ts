@@ -970,8 +970,21 @@ export class Game {
     this.renderer.setAnimationLoop((now: number) => {
       if (!this.running) return;
       const real = Math.min(0.05, (now - last) / 1000); last = now;
-      this.frame(real);
+      try { this.frame(real); } catch (err) { this.reportError(err); }
     });
+  }
+
+  private errShown = false;
+  /** A thrown error would kill the render loop (frozen screen): keep running and show it on screen so it can be reported. */
+  private reportError(err: unknown): void {
+    console.error(err);
+    if (this.errShown) return;
+    this.errShown = true;
+    const d = document.createElement('pre');
+    d.style.cssText = 'position:fixed;left:8px;top:8px;right:8px;z-index:9999;max-height:40vh;overflow:auto;margin:0;padding:8px;background:rgba(120,0,0,.85);color:#fff;font:11px monospace;white-space:pre-wrap;pointer-events:none';
+    d.textContent = 'ERROR: ' + (err instanceof Error ? (err.stack ?? err.message) : String(err)).slice(0, 900);
+    document.body.appendChild(d);
+    setTimeout(() => d.remove(), 15000);
   }
 
   private frame(real: number): void {
