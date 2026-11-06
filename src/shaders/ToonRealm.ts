@@ -95,13 +95,16 @@ export function createToonMaterial(o: ToonOpts = {}): THREE.MeshLambertMaterial 
 }
 
 /** Convert imported glTF materials so characters share the same toon/realm look. */
-export function toonifyObject(root: THREE.Object3D): void {
+export function toonifyObject(root: THREE.Object3D, lift = 0): void {
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
     const conv = (src: THREE.Material): THREE.Material => {
       const s = src as THREE.MeshStandardMaterial;
-      return createToonMaterial({ color: s.color ?? 0xffffff, map: s.map ?? null, vertexColors: !!(m.geometry.getAttribute('color')), emissive: s.emissive ?? 0, emissiveIntensity: s.emissiveIntensity ?? 1, transparent: s.transparent, opacity: s.opacity, side: s.side });
+      const out = createToonMaterial({ color: s.color ?? 0xffffff, map: s.map ?? null, vertexColors: !!(m.geometry.getAttribute('color')), emissive: s.emissive ?? 0, emissiveIntensity: s.emissiveIntensity ?? 1, transparent: s.transparent, opacity: s.opacity, side: s.side }) as THREE.MeshLambertMaterial;
+      // lift: self-lit fraction of the albedo texture so dark imported art stays readable in shadow
+      if (lift > 0 && s.map) { out.emissiveMap = s.map; out.emissive = new THREE.Color(1, 1, 1); out.emissiveIntensity = lift; }
+      return out;
     };
     m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material);
   });

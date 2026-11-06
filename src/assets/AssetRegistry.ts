@@ -53,15 +53,22 @@ class MixerAnimator implements Animator {
 
   constructor(asset: CharacterAsset, id: CharacterId) {
     const model = cloneSkinned(asset.scene) as THREE.Group;
-    toonifyObject(model);
-    model.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; });
+    toonifyObject(model, 0.45);
+    model.traverse((o) => {
+      if ((o as THREE.SkinnedMesh).isSkinnedMesh) o.frustumCulled = false;
+      // closed fists around the grips (the Mixamo clips animate open hands), held blades angled out of the fist
+      const f = /Hand(Thumb|Index|Middle|Ring|Pinky)\d$/.exec(o.name);
+      if (f) o.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), f[1] === 'Thumb' ? 0 : 1.05));
+      const w = /^sword_(Left|Right)Hand$/.exec(o.name);
+      if (w) { o.position.set(0, 0.03, 0); o.quaternion.setFromEuler(new THREE.Euler(0, 0, (w[1] === 'Left' ? 1 : -1) * 40 * Math.PI / 180)); }
+    });
     this.root.add(model);
     this.height = TARGET_HEIGHT[id];
     this.mixer = new THREE.AnimationMixer(model);
     for (const [name, srcClip] of Object.entries(asset.clips)) {
       // rotation-only: clip translations come from a differently-scaled skeleton and would collapse the rig into the floor
       const clip = srcClip.clone();
-      clip.tracks = clip.tracks.filter((tr) => !/\.(position|scale)$/.test(tr.name));
+      clip.tracks = clip.tracks.filter((tr) => !/\.(position|scale)$/.test(tr.name) && !/Hand(Thumb|Index|Middle|Ring|Pinky)\d\./.test(tr.name));
       const a = this.mixer.clipAction(clip);
       if (name === 'idle' || name === 'run') a.setLoop(THREE.LoopRepeat, Infinity);
       else { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
