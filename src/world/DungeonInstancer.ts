@@ -44,6 +44,9 @@ export class DungeonInstancer {
   drawCalls = 0;
   private slabSets: Array<{ mesh: THREE.InstancedMesh; list: Array<{ x: number; z: number; yaw: number; h: number }> }> = [];
   private slabTimer = 0;
+  private ghostMats: THREE.MeshLambertMaterial[] = [];
+  private ghostMeshes: THREE.InstancedMesh[] = [];
+  private decorShadows: Array<{ x: number; z: number; r: number }> = [];
   private slabAt = new THREE.Vector2(1e9, 1e9);
 
   constructor(readonly dungeon: Dungeon) {
@@ -158,6 +161,24 @@ export class DungeonInstancer {
       this.monoliths.push({ pos: p, room: r, index: i, alive: true, hp: r.kind === 'boss' ? 90 : 55, maxHp: r.kind === 'boss' ? 90 : 55 });
     });
 
+    // painted set dressing (solid decor casts a contact shadow; ghost decor only exists in the Unseen Realm)
+    const decorAll = d.rooms.flatMap((r) => r.decor).filter((q) => assets.hasEnv(q.id));
+    this.ghostMats = [];
+    for (const id of [...new Set(decorAll.map((q) => q.id))]) {
+      const list = decorAll.filter((q) => q.id === id);
+      const ghost = list[0].ghost;
+      let [geo, mat] = propFor(id);
+      if (!ghost && (mat as THREE.MeshLambertMaterial).emissiveMap) (mat as THREE.MeshLambertMaterial).emissiveIntensity = 0.8; // painted dressing should read, not sink into the dark
+      if (ghost) {
+        const gm = own(createToonMaterial({ map: assets.getEnvMap(id) ?? undefined, rim: 1.4, band: 0.5, transparent: true, opacity: 0, emissive: 0x2a5a7a })) as THREE.MeshLambertMaterial;
+        gm.depthWrite = false; gm.emissiveIntensity = 0.5; this.ghostMats.push(gm); mat = gm;
+      }
+      const mesh = add(new THREE.InstancedMesh(geo, mat, list.length));
+      list.forEach((q, i) => { put(mesh, i, q.x, 0, q.z, q.yaw); mesh.setColorAt(i, c.setScalar(0.85 + hash(q.x, q.z) * 0.15)); });
+      if (ghost) { mesh.visible = false; mesh.renderOrder = 2; this.ghostMeshes.push(mesh); }
+    }
+    this.decorShadows = decorAll.filter((q) => q.r > 0);
+
     // portal (hidden until the boss falls)
     const gateMesh = add(new THREE.InstancedMesh(...propFor('archway_gate'), 1));
     put(gateMesh, 0, d.portal.x, 0, d.portal.z - 0.5, Math.PI / 4, 0.85);
@@ -171,11 +192,12 @@ export class DungeonInstancer {
     this.portalMeshes = [gateMesh, disc];
 
     // grounding: contact shadows under every prop, warm light pools and glow halos around fires and runes
-    const sh = new BlobShadows(Math.max(1, pillars.length + this.braziers.length + monos.length + 1), 0.55);
+    const sh = new BlobShadows(Math.max(1, pillars.length + this.braziers.length + monos.length + this.decorShadows.length + 1), 0.55);
     sh.begin();
     pillars.forEach((p) => sh.add(p.x, p.z, 1.05));
     this.braziers.forEach((p) => sh.add(p.x, p.z, 0.85));
     monos.forEach(({ p }) => sh.add(p.x, p.z, 1.2));
+    this.decorShadows.forEach((q) => sh.add(q.x, q.z, q.r * 1.5));
     sh.end(); this.group.add(sh.mesh); this.drawCalls++; own(sh);
     this.poolMat = own(new THREE.MeshBasicMaterial({ map: radialTexture(), color: 0xffa050, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
     this.pools = add(new THREE.InstancedMesh(own(new THREE.PlaneGeometry(2, 2)), this.poolMat, Math.max(1, this.braziers.length)));
@@ -274,6 +296,8 @@ export class DungeonInstancer {
     this.bridgeMat.opacity = 0.12 + (0.88 * b);
     this.bridgeMat.emissive.setRGB(0.45 * b, 1.0 * b, 0.75 * b);
     this.bridgeMat.emissiveIntensity = 0.6;
+    for (const m of this.ghostMats) m.opacity = 0.9 * b;
+    for (const g of this.ghostMeshes) g.visible = b > 0.02;
 
     this.lightTimer -= dt;
     if (this.lightTimer <= 0) {

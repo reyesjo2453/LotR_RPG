@@ -318,6 +318,7 @@ export class Game {
       };
       for (const q of room.pillars) push(q.x, q.z, 0.5);
       for (const q of room.braziers) push(q.x, q.z, 0.38);
+      for (const q of room.decor) if (q.r > 0) push(q.x, q.z, q.r);
       for (const m of this.inst.monoliths) if (m.alive && m.room === room) push(m.pos.x, m.pos.z, 0.6);
     }
     return [x, z];

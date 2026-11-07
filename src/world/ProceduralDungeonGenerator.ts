@@ -1,3 +1,4 @@
+import type { EnvPropId } from '../assets/ProceduralAssetFallback';
 /** Seeded Mulberry32 + deterministic sunken-fortress floor generator. */
 
 export const GRID = 80;
@@ -29,11 +30,14 @@ export class Rng {
 }
 
 export interface Vec2 { x: number; z: number }
+/** Painted set dressing. r > 0 makes it solid (circle); `ghost` props only exist in the Unseen Realm. */
+export interface Decor { id: EnvPropId; x: number; z: number; yaw: number; r: number; ghost?: boolean }
 export interface Room {
   id: number; kind: RoomKind; shape: RoomShape;
   x: number; y: number; w: number; h: number; // tile coords
   center: Vec2;                                // world coords
   pillars: Vec2[]; braziers: Vec2[]; monoliths: Vec2[]; spawners: Vec2[];
+  decor: Decor[];
 }
 export interface Dungeon {
   seed: string; grid: Uint8Array; rooms: Room[];
@@ -67,6 +71,7 @@ const CELL = 26;
 
 export function generateDungeon(seedIn: number | string): Dungeon {
   const seed = String(seedIn);
+  let seedNum = 0; for (const ch of seed) seedNum = (seedNum * 31 + ch.charCodeAt(0)) % 9973;
   const rng = new Rng(seedIn);
   const grid = new Uint8Array(GRID * GRID);
   const set = (x: number, y: number, t: TileType) => { if (x > 0 && y > 0 && x < GRID - 1 && y < GRID - 1) grid[y * GRID + x] = t; };
@@ -84,7 +89,7 @@ export function generateDungeon(seedIn: number | string): Dungeon {
     const x = Math.floor(cx * CELL + 2 + rng.range(0, CELL - 4 - w));
     const y = Math.floor(cy * CELL + 2 + rng.range(0, CELL - 4 - h));
     const shape: RoomShape = kind === 'combat' && rng.next() < 0.5 ? 'octagon' : kind === 'boss' ? 'octagon' : 'rect';
-    rooms.push({ id: i, kind, shape, x, y, w, h, center: { x: tileToWorld(x + w / 2 - 0.5), z: tileToWorld(y + h / 2 - 0.5) }, pillars: [], braziers: [], monoliths: [], spawners: [] });
+    rooms.push({ id: i, kind, shape, x, y, w, h, center: { x: tileToWorld(x + w / 2 - 0.5), z: tileToWorld(y + h / 2 - 0.5) }, pillars: [], braziers: [], monoliths: [], spawners: [], decor: [] });
   });
 
   const inRoomShape = (r: Room, tx: number, ty: number): boolean => {
@@ -178,6 +183,42 @@ export function generateDungeon(seedIn: number | string): Dungeon {
       const clear = [...r.pillars, ...r.monoliths].every((q) => Math.hypot(q.x - p.x, q.z - p.z) > 2.6);
       if (free(tx, ty) && clear && Math.hypot(p.x - r.center.x, p.z - r.center.z) > 3) r.spawners.push(p);
     }
+  }
+
+  // Painted set dressing: themed per room, placed with a hash-based RNG so the layout above is unchanged.
+  const DECOR_R: Partial<Record<EnvPropId, number>> = { pillar_broken: 0.45, rubble_pile: 0.8, pillar_fallen: 0.7, pedestal_cracked: 0.4, statue_knight: 0.5, arch_fragment: 0.6, sarcophagus: 0.8, altar_offering: 0.9, obelisk_rune: 0.35, coffin_open: 0.6, offering_bowl: 0.4 };
+  const hz = (a: number, b: number) => { const v = Math.sin(a * 127.1 + b * 311.7 + 7.7) * 43758.5453; return v - Math.floor(v); };
+  for (const r of rooms) {
+    let n = 0;
+    const rnd = () => hz(r.id * 31 + seedNum, n++);
+    const keepOut: Vec2[] = [...r.pillars, ...r.braziers, ...r.monoliths, ...r.spawners, r.center];
+    const place = (id: EnvPropId, wall: boolean, ghost = false) => {
+      for (let tries = 0; tries < 24; tries++) {
+        const tx = Math.round(r.x + 1 + rnd() * (r.w - 3)), ty = Math.round(r.y + 1 + rnd() * (r.h - 3));
+        if (grid[ty * GRID + tx] !== TileType.FLOOR) continue;
+        const edge = tx <= r.x + 1 || ty <= r.y + 1 || tx >= r.x + r.w - 2 || ty >= r.y + r.h - 2;
+        if (wall && !edge) continue;
+        const p: Vec2 = { x: tileToWorld(tx) + (rnd() - 0.5) * 0.6, z: tileToWorld(ty) + (rnd() - 0.5) * 0.6 };
+        const rad = ghost ? 0 : DECOR_R[id] ?? 0.5;
+        if (!ghost && keepOut.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < rad + 1.7)) continue;
+        if (r.kind === 'boss' && Math.hypot(p.x - r.center.x, p.z - r.center.z) < 4) continue;
+        const yaw = wall ? Math.atan2(r.center.x - p.x, r.center.z - p.z) + (rnd() - 0.5) * 0.5 : rnd() * Math.PI * 2;
+        r.decor.push({ id, x: p.x, z: p.z, yaw, r: rad, ghost: ghost || undefined });
+        if (!ghost) keepOut.push(p);
+        return;
+      }
+    };
+    if (r.kind === 'start') { place('rubble_pile', true); place('pillar_fallen', true); continue; }
+    if (r.kind === 'boss') {
+      place('statue_knight', true); place('statue_knight', true); place('obelisk_rune', true); place('obelisk_rune', true);
+      place('sarcophagus', true); place('sarcophagus', true); place('altar_offering', true); place('offering_bowl', false); place('rubble_pile', true); place('rubble_pile', true);
+    } else if (rnd() < 0.4) {
+      place('sarcophagus', true); place('sarcophagus', true); place('coffin_open', true); place('offering_bowl', false); place('obelisk_rune', true);
+    } else {
+      place('pillar_broken', true); place('rubble_pile', true); place('rubble_pile', true); place('pillar_fallen', false);
+      if (rnd() < 0.5) place('arch_fragment', true); else { place('pedestal_cracked', true); place('statue_knight', true); }
+    }
+    place('arch_spectral', true, true); place('brazier_blue', false, true);
   }
 
   // Remove dressing that landed on bridge tiles, then wall off everything adjacent to walkable space
