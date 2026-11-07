@@ -49,24 +49,41 @@ export class DungeonInstancer {
     const own = <T extends { dispose(): void }>(o: T): T => { this.owned.push(o); return o; };
     const add = (m: THREE.InstancedMesh) => { m.frustumCulled = false; this.group.add(m); this.drawCalls++; return m; };
 
-    // floor slabs
-    const floorGeo = own(new THREE.BoxGeometry(TILE, 0.4, TILE).translate(0, -0.2, 0));
-    const floorMat = own(createToonMaterial({ color: 0xffffff, veins: 1, rim: 0.4 }));
-    const floor = add(new THREE.InstancedMesh(floorGeo, floorMat, floorTiles.length));
+    // painted tile textures (seamless; made by scripts/make-tile.mjs). Floor alternates between two
+    // variants and each tile is rotated in 90° steps so the repeat is hard to spot.
+    const loader = new THREE.TextureLoader();
+    const tex = (n: string) => {
+      const t = loader.load(`${import.meta.env.BASE_URL}assets/tex/${n}.jpg`);
+      t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+      return own(t);
+    };
+    const lit = (m: THREE.MeshLambertMaterial, map: THREE.Texture, k: number) => { m.emissiveMap = map; m.emissive = new THREE.Color(1, 1, 1); m.emissiveIntensity = k; return m; };
     const c = new THREE.Color();
-    floorTiles.forEach((idx, n) => {
-      const x = idx % GRID, y = (idx / GRID) | 0, h = hash(x, y);
-      put(floor, n, tileToWorld(x), 0, tileToWorld(y));
-      floor.setColorAt(n, c.setHSL(0.72, 0.12, 0.2 + h * 0.07 + (((x + y) & 1) ? 0.025 : 0)));
+    const floorGeo = own(new THREE.BoxGeometry(TILE, 0.4, TILE).translate(0, -0.2, 0));
+    const floorVariants = ['floor_a', 'floor_b'].map((n, v) => {
+      const map = tex(n);
+      const mat = own(lit(createToonMaterial({ color: 0xffffff, map, veins: 1, rim: 0.4 }), map, 0.38));
+      const tiles = floorTiles.filter((idx) => ((hash(idx % GRID, (idx / GRID) | 0) * 7) | 0) % 2 === v);
+      return { mat, tiles };
     });
+    for (const { mat, tiles } of floorVariants) {
+      const mesh = add(new THREE.InstancedMesh(floorGeo, mat, Math.max(1, tiles.length)));
+      mesh.count = tiles.length;
+      tiles.forEach((idx, n) => {
+        const x = idx % GRID, y = (idx / GRID) | 0, h = hash(x, y);
+        put(mesh, n, tileToWorld(x), 0, tileToWorld(y), Math.floor(hash(y, x) * 4) * Math.PI / 2);
+        mesh.setColorAt(n, c.setScalar(0.82 + h * 0.18));
+      });
+    }
     // wall segments
     const wallGeo = own(new THREE.BoxGeometry(TILE, 2.4, TILE).translate(0, 0.8, 0));
-    const wallMat = own(createToonMaterial({ color: 0xffffff, rim: 0.7 }));
+    const wallMap = tex('wall');
+    const wallMat = own(lit(createToonMaterial({ color: 0xffffff, map: wallMap, rim: 0.7 }), wallMap, 0.3));
     const walls = add(new THREE.InstancedMesh(wallGeo, wallMat, wallTiles.length));
     wallTiles.forEach((idx, n) => {
       const x = idx % GRID, y = (idx / GRID) | 0, h = hash(y, x);
       put(walls, n, tileToWorld(x), 0, tileToWorld(y));
-      walls.setColorAt(n, c.setHSL(0.74, 0.18, 0.1 + h * 0.05));
+      walls.setColorAt(n, c.setScalar(0.78 + h * 0.18));
     });
     // spectral bridge slabs
     this.bridgeMat = own(createToonMaterial({ vertexColors: true, transparent: true, opacity: 0.12, rim: 1.4, emissive: 0x000000 }));
