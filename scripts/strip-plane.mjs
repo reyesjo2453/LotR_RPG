@@ -3,7 +3,7 @@
 // usage: node scripts/strip-plane.mjs <in.glb> [out.glb=in.glb]
 import { NodeIO } from '@gltf-transform/core';
 import { prune } from '@gltf-transform/functions';
-const strict = process.argv.includes('--strict'); const [src, out = src] = process.argv.slice(2).filter((a) => a !== '--strict');
+const strict = process.argv.includes('--strict'), islands = process.argv.includes('--islands'); const [src, out = src] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const doc = await new NodeIO().read(src);
 let removed = 0;
 for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
@@ -20,9 +20,14 @@ for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitiv
   }
   const big = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
   const bad = new Set();
+  // --islands: also drop flat fragments that stick out past the main body (leftover backdrop slivers/rims)
+  let main = null, mainN = -1; const cnt = new Map();
+  for (let i = 0; i < ia.length; i += 3) { const r = find(ia[i]); cnt.set(r, (cnt.get(r) ?? 0) + 1); }
+  for (const [r, c] of cnt) if (c > mainN) { mainN = c; main = bb.get(r); }
   for (const [r, b] of bb) {
     const h = b.mx[1] - b.mn[1], w = Math.max(b.mx[0] - b.mn[0], b.mx[2] - b.mn[2]);
     if (h < 0.06 * big && (strict || w > 0.5 * big)) bad.add(r);
+    else if (islands && b !== main && h < 0.08 * big && (b.mn[0] < main.mn[0] - 0.08 * big || b.mx[0] > main.mx[0] + 0.08 * big || b.mn[2] < main.mn[2] - 0.08 * big || b.mx[2] > main.mx[2] + 0.08 * big)) bad.add(r);
   }
   const keep = [];
   for (let i = 0; i < ia.length; i += 3) if (!bad.has(find(ia[i]))) keep.push(ia[i], ia[i + 1], ia[i + 2]); else removed++;

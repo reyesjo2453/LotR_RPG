@@ -11,7 +11,7 @@ import { toonifyObject } from '../shaders/ToonRealm';
 
 const CHARACTERS: CharacterId[] = ['vaelen', 'seraphina', 'kaelen', 'castellan_knight', 'barrow_hound'];
 const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runestone_monolith', 'bridge_broken', 'archway_gate', 'wall_corner', 'wall_alcove', 'floor_edge',
-  'pillar_broken', 'rubble_pile', 'pillar_fallen', 'pedestal_cracked', 'statue_knight', 'arch_fragment', 'sarcophagus', 'altar_offering', 'obelisk_rune', 'coffin_open', 'offering_bowl', 'arch_spectral', 'brazier_blue'];
+  'pillar_broken', 'rubble_pile', 'pillar_fallen', 'pedestal_cracked', 'statue_knight', 'arch_fragment', 'sarcophagus', 'altar_offering', 'obelisk_rune', 'coffin_open', 'offering_bowl', 'arch_spectral', 'brazier_blue', 'barrels_stack', 'throne_stone', 'cage_iron'];
 const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit', 'combo', 'stab', 'dodge'] as const;
 const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8, kaelen: 1.55, castellan_knight: 2.7, barrow_hound: 1.05 };
 
@@ -44,7 +44,7 @@ const ENV_FIT: Partial<Record<EnvPropId, { h?: number; box?: [number, number, nu
   wall_alcove: { box: [2.5, 1.84, 0.45] },
   pillar_broken: { h: 2.3 }, rubble_pile: { h: 1.1 }, pillar_fallen: { h: 0.8 }, pedestal_cracked: { h: 1.0 }, statue_knight: { h: 1.7 },
   arch_fragment: { h: 2.6 }, sarcophagus: { h: 1.1 }, altar_offering: { h: 1.0 }, obelisk_rune: { h: 2.4 }, coffin_open: { h: 0.9 },
-  offering_bowl: { h: 1.0 }, arch_spectral: { h: 3.0 }, brazier_blue: { h: 1.45 },
+  offering_bowl: { h: 1.0 }, arch_spectral: { h: 3.0 }, brazier_blue: { h: 1.45 }, barrels_stack: { h: 0.95 }, throne_stone: { h: 2.0 }, cage_iron: { h: 1.5 },
   bridge_broken: { box: [2.5, 0.3, 2.5], sink: 0.3 }, // one tile, top flush with the floor
 };
 
