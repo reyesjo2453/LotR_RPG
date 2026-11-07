@@ -33,10 +33,19 @@ function trimClip(clip: THREE.AnimationClip, name: string, t0: number, t1: numbe
   return new THREE.AnimationClip(name, end - t0, tracks);
 }
 
+/** Target size of imported props (world units), matched to the procedural kit they replace. */
+const ENV_FIT: Partial<Record<EnvPropId, { h?: number; box?: [number, number, number]; sink?: number }>> = {
+  pillar_elven: { h: 3.75 },
+  brazier_iron: { h: 1.45 },
+  runestone_monolith: { h: 3.4 },
+  archway_gate: { h: 3.6 },
+  bridge_broken: { box: [2.5, 0.3, 2.5], sink: 0.3 }, // one tile, top flush with the floor
+};
+
 interface CharacterAsset { scene: THREE.Group; clips: Record<string, THREE.AnimationClip> }
 
 /** Merge every mesh of a prop into one vertex-coloured geometry so it can be drawn as a single InstancedMesh. */
-export function mergeToGeometry(group: THREE.Object3D): THREE.BufferGeometry {
+export function mergeToGeometry(group: THREE.Object3D, keepUV = false): THREE.BufferGeometry {
   group.updateMatrixWorld(true);
   const parts: THREE.BufferGeometry[] = [];
   group.traverse((o) => {
@@ -44,9 +53,9 @@ export function mergeToGeometry(group: THREE.Object3D): THREE.BufferGeometry {
     if (!m.isMesh) return;
     let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
     g.applyMatrix4(m.matrixWorld);
-    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'color') g.deleteAttribute(k);
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'color' && !(keepUV && k === 'uv')) g.deleteAttribute(k);
     if (!g.getAttribute('normal')) g.computeVertexNormals();
-    if (!g.getAttribute('color')) {
+    if (!g.getAttribute('color') && !(keepUV && g.getAttribute('uv'))) {
       const src = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshLambertMaterial;
       const c = (src.color ? src.color.clone() : new THREE.Color(1, 1, 1));
       if (src.emissive && src.emissive.getHex() !== 0) c.add(src.emissive.clone().multiplyScalar(src.emissiveIntensity));
@@ -205,6 +214,9 @@ class AssetRegistry {
   private chars = new Map<CharacterId, CharacterAsset>();
   private env = new Map<EnvPropId, THREE.Group>();
   private envGeo = new Map<EnvPropId, THREE.BufferGeometry>();
+  private envMap = new Map<EnvPropId, THREE.Texture>();
+  /** Albedo texture of an imported (textured) prop, if it has one. Call after getEnvGeometry. */
+  getEnvMap(id: EnvPropId): THREE.Texture | null { return this.envMap.get(id) ?? null; }
   /** Which assets were found on disk (everything else is procedural). */
   readonly loaded: string[] = [];
 
@@ -266,9 +278,19 @@ class AssetRegistry {
     let g = this.envGeo.get(id);
     if (!g) {
       const src = this.env.get(id) ?? buildEnvProp(id);
-      g = mergeToGeometry(src);
-      // normalise imported props to the footprint of the procedural kit
-      if (this.env.has(id)) { g.computeBoundingBox(); const bb = g.boundingBox!; g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2); }
+      let map: THREE.Texture | null = null;
+      src.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (!map && m?.map) map = m.map; });
+      g = mergeToGeometry(src, !!map);
+      // normalise imported props to the size and footprint of the procedural kit
+      if (this.env.has(id)) {
+        g.computeBoundingBox(); let bb = g.boundingBox!;
+        g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+        const fit = ENV_FIT[id];
+        if (fit?.h) g.scale(fit.h / (bb.max.y - bb.min.y), fit.h / (bb.max.y - bb.min.y), fit.h / (bb.max.y - bb.min.y));
+        else if (fit?.box) g.scale(fit.box[0] / (bb.max.x - bb.min.x), fit.box[1] / (bb.max.y - bb.min.y), fit.box[2] / (bb.max.z - bb.min.z));
+        if (fit?.sink) g.translate(0, -fit.sink, 0);
+        if (map) this.envMap.set(id, map);
+      }
       this.envGeo.set(id, g);
     }
     return g;

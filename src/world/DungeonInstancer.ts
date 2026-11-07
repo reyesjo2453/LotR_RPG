@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { assets } from '../assets/AssetRegistry';
+import type { EnvPropId } from '../assets/ProceduralAssetFallback';
 import { createToonMaterial, sharedUniforms } from '../shaders/ToonRealm';
 import { GRID, TILE, TileType, tileToWorld, type Dungeon, type Room, type Vec2 } from './ProceduralDungeonGenerator';
 import { realm } from './RealmManager';
@@ -70,25 +71,36 @@ export class DungeonInstancer {
     // spectral bridge slabs
     this.bridgeMat = own(createToonMaterial({ vertexColors: true, transparent: true, opacity: 0.12, rim: 1.4, emissive: 0x000000 }));
     this.bridgeMat.depthWrite = false;
-    const bridge = add(new THREE.InstancedMesh(assets.getEnvGeometry('bridge_broken'), this.bridgeMat, bridgeTiles.length));
+    const bridgeGeo = assets.getEnvGeometry('bridge_broken');
+    const bridgeMap = assets.getEnvMap('bridge_broken');
+    if (bridgeMap) { this.bridgeMat.vertexColors = false; (this.bridgeMat as THREE.MeshLambertMaterial).map = bridgeMap; this.bridgeMat.needsUpdate = true; }
+    const bridge = add(new THREE.InstancedMesh(bridgeGeo, this.bridgeMat, bridgeTiles.length));
     bridgeTiles.forEach((idx, n) => put(bridge, n, tileToWorld(idx % GRID), 0, tileToWorld((idx / GRID) | 0)));
     bridge.renderOrder = 2;
 
     // props
-    const propMat = own(createToonMaterial({ vertexColors: true, rim: 1 }));
+    const vcMat = own(createToonMaterial({ vertexColors: true, rim: 1 }));
+    // props with an imported painted texture get their own lit material; procedural ones use vertex colours
+    const propFor = (id: EnvPropId): [THREE.BufferGeometry, THREE.Material] => {
+      const geo = assets.getEnvGeometry(id), map = assets.getEnvMap(id);
+      if (!map) return [geo, vcMat];
+      const m = own(createToonMaterial({ map, rim: 1 })) as THREE.MeshLambertMaterial;
+      m.emissiveMap = map; m.emissive = new THREE.Color(1, 1, 1); m.emissiveIntensity = 0.4; // keep dark art readable
+      return [geo, m];
+    };
     const pillars: Vec2[] = [], monos: Array<{ p: Vec2; r: Room }> = [];
     for (const r of d.rooms) {
       pillars.push(...r.pillars);
       this.braziers.push(...r.braziers);
       r.monoliths.forEach((p) => monos.push({ p, r }));
     }
-    const pm = add(new THREE.InstancedMesh(assets.getEnvGeometry('pillar_elven'), propMat, Math.max(1, pillars.length)));
+    const pm = add(new THREE.InstancedMesh(...propFor('pillar_elven'), Math.max(1, pillars.length)));
     pm.count = pillars.length;
     pillars.forEach((p, i) => put(pm, i, p.x, 0, p.z, hash(p.x, p.z) * 6.28, 0.72));
-    const bm = add(new THREE.InstancedMesh(assets.getEnvGeometry('brazier_iron'), propMat, Math.max(1, this.braziers.length)));
+    const bm = add(new THREE.InstancedMesh(...propFor('brazier_iron'), Math.max(1, this.braziers.length)));
     bm.count = this.braziers.length;
     this.braziers.forEach((p, i) => put(bm, i, p.x, 0, p.z, hash(p.z, p.x) * 6.28));
-    this.monolithMesh = add(new THREE.InstancedMesh(assets.getEnvGeometry('runestone_monolith'), propMat, Math.max(1, monos.length)));
+    this.monolithMesh = add(new THREE.InstancedMesh(...propFor('runestone_monolith'), Math.max(1, monos.length)));
     this.monolithMesh.count = monos.length;
     monos.forEach(({ p, r }, i) => {
       put(this.monolithMesh, i, p.x, 0, p.z, hash(p.x, p.z) * 6.28, 0.85);
@@ -96,7 +108,7 @@ export class DungeonInstancer {
     });
 
     // portal (hidden until the boss falls)
-    const gateMesh = add(new THREE.InstancedMesh(assets.getEnvGeometry('archway_gate'), propMat, 1));
+    const gateMesh = add(new THREE.InstancedMesh(...propFor('archway_gate'), 1));
     put(gateMesh, 0, d.portal.x, 0, d.portal.z - 0.5, Math.PI / 4, 0.85);
     gateMesh.visible = false;
     const discMat = own(createToonMaterial({ color: 0x55ffc0, emissive: 0x55ffc0, emissiveIntensity: 1.6, transparent: true, opacity: 0.55, side: THREE.DoubleSide, rim: 0 }));
