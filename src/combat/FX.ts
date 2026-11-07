@@ -78,7 +78,7 @@ export class FX {
             float rad=smoothstep(0.45,0.8,r)*(1.0-smoothstep(0.93,1.0,r)*0.5);
             float al=tail*rad*(1.0-uT*uT); gl_FragColor=vec4(mix(uColor,vec3(1.0),tail*0.45)*1.4,al*0.95); }`,
       });
-      const mesh = new THREE.Mesh(arcGeo, mat); mesh.rotation.x = -Math.PI / 2; mesh.position.y = 0.9; mesh.frustumCulled = false;
+      const mesh = new THREE.Mesh(arcGeo, mat); mesh.rotation.x = -Math.PI / 2; mesh.position.y = 0.45; mesh.frustumCulled = false;
       const g2 = new THREE.Group(); g2.add(mesh); g2.visible = false; g2.renderOrder = 9; this.group.add(g2);
       this.arcs.push({ g: g2, mat, t: 1, dur: 0.3, busy: false });
     }
@@ -142,10 +142,10 @@ export class FX {
   sparks(x: number, y: number, z: number, count = 26): void { this.burst(x, y, z, 0xfff2c0, count, 11, 0.4, 7, 14); this.burst(x, y, z, 0xffa040, count / 2, 6, 0.5, 9, 8); }
 
   // ───── slash ribbon ─────
-  slashArc(x: number, z: number, yaw: number, color: number, radius: number, dur = 0.32): void {
+  slashArc(x: number, z: number, yaw: number, color: number, radius: number, dur = 0.32, flip = false): void {
     const a = this.arcs.find((s) => !s.busy); if (!a) return;
     a.busy = true; a.t = 0; a.dur = dur; a.g.visible = true;
-    a.g.position.set(x, 0, z); a.g.rotation.y = yaw - Math.PI / 2; a.g.scale.setScalar(radius);
+    a.g.position.set(x, 0, z); a.g.rotation.y = yaw - Math.PI / 2; a.g.scale.set(radius, radius, flip ? -radius : radius);
     a.mat.uniforms.uColor.value.set(color);
   }
 
