@@ -53,8 +53,9 @@ try {
   if (!isUrl) {
     const ext = src.toLowerCase().split('.').pop();
     const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
-    imageUrl = await fal.storage.upload(new Blob([readFileSync(src)], { type }));
-    console.log(`[${name}] uploaded ${basename(src)}`);
+    // inline data URI: no separate storage-upload host needed (fal accepts base64 data URIs for file inputs)
+    imageUrl = `data:${type};base64,${readFileSync(src).toString('base64')}`;
+    console.log(`[${name}] sending ${basename(src)} inline`);
   }
   // One submit = one billable job. Never retried automatically: on an unclear result, check the request id first.
   const { request_id } = await fal.queue.submit(ENDPOINT, { input: { image_url: imageUrl, ...input } });
