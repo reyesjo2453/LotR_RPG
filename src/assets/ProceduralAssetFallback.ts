@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createToonMaterial } from '../shaders/ToonRealm';
 
 export type CharacterId = 'vaelen' | 'seraphina' | 'kaelen' | 'castellan_knight' | 'barrow_hound';
-export type EnvPropId = 'pillar_elven' | 'wall_segment' | 'brazier_iron' | 'runestone_monolith' | 'bridge_broken' | 'archway_gate';
+export type EnvPropId = 'pillar_elven' | 'wall_segment' | 'brazier_iron' | 'runestone_monolith' | 'bridge_broken' | 'archway_gate' | 'wall_corner' | 'wall_alcove' | 'floor_edge';
 export type OneShot = 'slash' | 'hit' | 'combo' | 'stab' | 'dodge' | 'swing1' | 'swing2' | 'swing3' | 'swing4';
 
 /** Unified animation controller: procedural rigs and GLB mixers both implement this. */
@@ -309,6 +309,9 @@ export function buildEnvProp(id: EnvPropId): THREE.Group {
       add(g, box(0.18, 0.5, 0.2), mat(DARK), -0.3, 2.9, 0.2).rotation.z = 0.5;   // crack
       return g;
     }
+    case 'wall_corner':
+    case 'wall_alcove':
+    case 'floor_edge':
     case 'wall_segment': {
       add(g, box(2.5, 2.0, 2.5), mat(OBSIDIAN), 0, 1.0, 0);
       add(g, box(2.58, 0.18, 2.58), mat(0x2b2838), 0, 2.05, 0);

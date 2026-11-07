@@ -10,7 +10,7 @@ import {
 import { toonifyObject } from '../shaders/ToonRealm';
 
 const CHARACTERS: CharacterId[] = ['vaelen', 'seraphina', 'kaelen', 'castellan_knight', 'barrow_hound'];
-const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runestone_monolith', 'bridge_broken', 'archway_gate'];
+const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runestone_monolith', 'bridge_broken', 'archway_gate', 'wall_corner', 'wall_alcove', 'floor_edge'];
 const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit', 'combo', 'stab', 'dodge'] as const;
 const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8, kaelen: 1.55, castellan_knight: 2.7, barrow_hound: 1.05 };
 
@@ -39,6 +39,8 @@ const ENV_FIT: Partial<Record<EnvPropId, { h?: number; box?: [number, number, nu
   brazier_iron: { h: 1.45 },
   runestone_monolith: { h: 3.4 },
   archway_gate: { h: 3.6 },
+  wall_segment: { box: [2.5, 1.84, 0.45] }, // facade slab laid on the room-facing side of a wall tile
+  wall_alcove: { box: [2.5, 1.84, 0.45] },
   bridge_broken: { box: [2.5, 0.3, 2.5], sink: 0.3 }, // one tile, top flush with the floor
 };
 
@@ -233,6 +235,7 @@ class AssetRegistry {
   private envGeo = new Map<EnvPropId, THREE.BufferGeometry>();
   private envMap = new Map<EnvPropId, THREE.Texture>();
   /** Albedo texture of an imported (textured) prop, if it has one. Call after getEnvGeometry. */
+  hasEnv(id: EnvPropId): boolean { return this.env.has(id); }
   getEnvMap(id: EnvPropId): THREE.Texture | null { return this.envMap.get(id) ?? null; }
   /** Which assets were found on disk (everything else is procedural). */
   readonly loaded: string[] = [];

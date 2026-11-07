@@ -21,7 +21,7 @@ const before = count();
 await doc.transform(weld());
 const now = count();
 if (now > Number(tgt)) {
-  await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: Number(tgt) / now, error: 0.02, lockBorder: true }));
+  await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: Number(tgt) / now, error: Number(process.env.ERR ?? 0.02), lockBorder: process.env.LOCK !== '0' }));
 }
 await doc.transform(dedup(), prune());
 for (const t of doc.getRoot().listTextures()) {

@@ -95,6 +95,7 @@ export class Game {
   private running = true;
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
+    if (location.search.includes('debug')) (window as unknown as { __game: Game }).__game = this; // dev hook for screenshots
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.autoClear = false;
     this.scene.background = new THREE.Color(0x07060a);

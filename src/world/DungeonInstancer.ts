@@ -42,6 +42,9 @@ export class DungeonInstancer {
   private flickerSeed: number[] = [];
   private owned: Array<{ dispose(): void }> = [];
   drawCalls = 0;
+  private slabSets: Array<{ mesh: THREE.InstancedMesh; list: Array<{ x: number; z: number; yaw: number; h: number }> }> = [];
+  private slabTimer = 0;
+  private slabAt = new THREE.Vector2(1e9, 1e9);
 
   constructor(readonly dungeon: Dungeon) {
     const d = dungeon;
@@ -81,8 +84,18 @@ export class DungeonInstancer {
         mesh.setColorAt(n, c.setScalar(0.82 + h * 0.18));
       });
     }
-    // wall segments
-    const wallGeo = own(new THREE.BoxGeometry(TILE, 2.4, TILE).translate(0, 0.8, 0));
+    const vcMat = own(createToonMaterial({ vertexColors: true, rim: 1 }));
+    // props with an imported painted texture get their own lit material; procedural ones use vertex colours
+    const propFor = (id: EnvPropId): [THREE.BufferGeometry, THREE.Material] => {
+      const geo = assets.getEnvGeometry(id), map = assets.getEnvMap(id);
+      if (!map) return [geo, vcMat];
+      const m = own(createToonMaterial({ map, rim: 1, band: 0.5 })) as THREE.MeshLambertMaterial;
+      m.emissiveMap = map; m.emissive = new THREE.Color(1, 1, 1); m.emissiveIntensity = 0.4; // keep dark art readable
+      return [geo, m];
+    };
+    // walls: a solid core per tile, dressed with painted facade slabs on every face that borders open ground
+    const facade = assets.hasEnv('wall_segment');
+    const wallGeo = own(new THREE.BoxGeometry(TILE, 2.4, TILE).translate(0, facade ? 0.5 : 0.8, 0));
     const wallMap = tex('wall');
     const wallMat = own(lit(createToonMaterial({ color: 0xffffff, map: wallMap, rim: 0.7, band: 0.2 }), wallMap, 0.5));
     const walls = add(new THREE.InstancedMesh(wallGeo, wallMat, wallTiles.length));
@@ -91,6 +104,30 @@ export class DungeonInstancer {
       put(walls, n, tileToWorld(x), 0, tileToWorld(y));
       walls.setColorAt(n, c.setScalar(0.78 + h * 0.18));
     });
+    const walkable = (x: number, y: number) => {
+      if (x < 0 || y < 0 || x >= GRID || y >= GRID) return false;
+      const t = d.grid[y * GRID + x];
+      return t === TileType.FLOOR || t === TileType.PORTAL || t === TileType.SPECTRAL_BRIDGE;
+    };
+    const faces: Array<{ x: number; z: number; yaw: number; alcove: boolean; h: number }> = [];
+    const slabOut = TILE / 2 + 0.2 - 0.225; // the brick plane sits ~0.2 behind the slab's outer edge, so push the slab out until it clears the core box
+    for (const idx of facade ? wallTiles : []) {
+      const x = idx % GRID, y = (idx / GRID) | 0;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (!walkable(x + dx, y + dz)) continue;
+        const h = hash(x * 3 + dx * 7, y * 5 + dz * 11);
+        faces.push({ x: tileToWorld(x) + dx * slabOut, z: tileToWorld(y) + dz * slabOut, yaw: Math.atan2(dx, dz), alcove: h < 0.12 && assets.hasEnv('wall_alcove'), h });
+      }
+    }
+    // Only slabs near the player are drawn (re-selected a few times a second): bounds the triangle load on phones.
+    for (const kind of ['wall_segment', 'wall_alcove'] as const) {
+      const list = faces.filter((f) => f.alcove === (kind === 'wall_alcove'));
+      if (!list.length) continue;
+      const mesh = add(new THREE.InstancedMesh(...propFor(kind), list.length));
+      mesh.count = 0;
+      this.slabSets.push({ mesh, list });
+    }
+
     // spectral bridge slabs
     this.bridgeMat = own(createToonMaterial({ vertexColors: true, transparent: true, opacity: 0.12, rim: 1.4, emissive: 0x000000 }));
     this.bridgeMat.depthWrite = false;
@@ -102,15 +139,6 @@ export class DungeonInstancer {
     bridge.renderOrder = 2;
 
     // props
-    const vcMat = own(createToonMaterial({ vertexColors: true, rim: 1 }));
-    // props with an imported painted texture get their own lit material; procedural ones use vertex colours
-    const propFor = (id: EnvPropId): [THREE.BufferGeometry, THREE.Material] => {
-      const geo = assets.getEnvGeometry(id), map = assets.getEnvMap(id);
-      if (!map) return [geo, vcMat];
-      const m = own(createToonMaterial({ map, rim: 1, band: 0.5 })) as THREE.MeshLambertMaterial;
-      m.emissiveMap = map; m.emissive = new THREE.Color(1, 1, 1); m.emissiveIntensity = 0.4; // keep dark art readable
-      return [geo, m];
-    };
     const pillars: Vec2[] = [], monos: Array<{ p: Vec2; r: Room }> = [];
     for (const r of d.rooms) {
       pillars.push(...r.pillars);
@@ -216,7 +244,31 @@ export class DungeonInstancer {
     this.monolithMesh.instanceMatrix.needsUpdate = true;
   }
 
+  /** Fill the slab instance buffers with the faces within view range of the player. */
+  private selectSlabs(px: number, pz: number): void {
+    const R2 = 30 * 30, c = new THREE.Color();
+    for (const { mesh, list } of this.slabSets) {
+      let n = 0;
+      for (const f of list) {
+        const dx = f.x - px, dz = f.z - pz;
+        if (dx * dx + dz * dz > R2) continue;
+        put(mesh, n, f.x, 0, f.z, f.yaw);
+        mesh.setColorAt(n, c.setScalar(0.82 + f.h * 0.18));
+        n++;
+      }
+      mesh.count = n;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+    this.slabAt.set(px, pz);
+  }
+
   update(dt: number, player: Vec2): void {
+    this.slabTimer -= dt;
+    if (this.slabSets.length && (this.slabTimer <= 0 || this.slabAt.x > 1e8)) {
+      this.slabTimer = 0.4;
+      if (Math.hypot(player.x - this.slabAt.x, player.z - this.slabAt.y) > 2 || this.slabAt.x > 1e8) this.selectSlabs(player.x, player.z);
+    }
     // bridge solidity visual: ghost 0.12 -> glowing silver-emerald
     const b = realm.uRealmBlend;
     this.bridgeMat.opacity = 0.12 + (0.88 * b);
