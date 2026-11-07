@@ -83,7 +83,7 @@ export class Game {
   };
 
   // juice
-  private hitstop = 0; private slow = 0; private trauma = 0; private camPos = new THREE.Vector3(); private time = 0;
+  private hitstop = 0; private punch = { x: 0, z: 0 }; private zoomPulse = 0; private slow = 0; private trauma = 0; private camPos = new THREE.Vector3(); private time = 0;
   private barGeo = new THREE.PlaneGeometry(1, 1).translate(0.5, 0, 0);
   private barBg = new THREE.MeshBasicMaterial({ color: 0x050308, transparent: true, opacity: 0.8, depthTest: false });
   private barHpMat = new THREE.MeshBasicMaterial({ color: 0xff3a50, depthTest: false });
@@ -175,6 +175,13 @@ export class Game {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Swing trail: follow each weapon blade while the hero is striking. */
+  private feedTrails(): void {
+    const p = this.p;
+    if (!p.atk && p.flurryT <= 0) return;
+    const blades = p.anims[p.hero].blades?.();
+    blades?.forEach(([b, t], i) => this.fx.trailPush(i, b, t, this.def.color));
+  }
   private addTrauma(v: number): void { this.trauma = Math.min(1, this.trauma + v); }
   private toScreen(x: number, y: number, z: number): { x: number; y: number } {
     const v = new THREE.Vector3(x, y, z).project(this.camera);
@@ -576,7 +583,13 @@ export class Game {
     e.hitFlash = 0.12;
     if (e.tut === 'effigy') this.tut.emit('hit');
     e.kx += o.dx * o.kb * (e.kind === 'boss' ? 0.3 : e.kind === 'knight' ? 0.7 : 1.2); e.kz += o.dz * o.kb * (e.kind === 'boss' ? 0.3 : e.kind === 'knight' ? 0.7 : 1.2);
-    this.fx.burst(e.x, e.height * 0.55, e.z, o.astral ? 0xc6a0ff : 0xfff0c0, 8, 6, 0.35);
+    {
+      const power = (o.finisher ? 1.8 : label ? 1.4 : 1) * (e.kind === 'boss' ? 1.2 : 1);
+      this.fx.impact(e.x - o.dx * e.radius * 0.5, e.height * 0.55, e.z - o.dz * e.radius * 0.5, o.dx, o.dz, o.astral ? 0xc6a0ff : this.def.color, power);
+      this.punch.x += o.dx * 0.16 * power; this.punch.z += o.dz * 0.16 * power; // camera shoves along the blow
+      this.zoomPulse = Math.min(0.06, this.zoomPulse + 0.018 * power);
+      if (label) this.hitstop = Math.max(this.hitstop, 0.03 * power);
+    }
     if (!o.quiet) { sfx.hit(); if (o.finisher || o.kb > 5) sfx.clash(1); }
     this.say(e.x, e.height + 0.4, e.z, `${label}${Math.max(1, Math.round(dmg))}`, kind);
     if (e.state !== 'broken' && e.state !== 'telegraph') e.anim.play('hit', 0.25);
@@ -723,7 +736,7 @@ export class Game {
     if (s.finisher) this.tryDetonate(s.dmg);
     const any = this.area(this.p.x, this.p.z, s.radius, a.yaw, s.arc, s, !!s.finisher);
     const w = id === 'kaelen' ? 1.9 : id === 'vaelen' ? 0.8 : 1;
-    if (any) { this.hitstop = Math.max(this.hitstop, (s.finisher ? 0.05 : 0.025) * w); this.addTrauma((s.finisher ? 0.35 : 0.15) * w); if (id === 'kaelen') sfx.slam(); else sfx.clash(s.finisher ? 1 : 0.6); this.fx.sparks(this.p.x + Math.sin(a.yaw) * s.radius * 0.7, 1.2, this.p.z + Math.cos(a.yaw) * s.radius * 0.7, s.finisher ? 22 : 10); }
+    if (any) { this.hitstop = Math.max(this.hitstop, (s.finisher ? 0.085 : 0.04) * w); this.addTrauma((s.finisher ? 0.35 : 0.15) * w); if (id === 'kaelen') sfx.slam(); else sfx.clash(s.finisher ? 1 : 0.6); this.fx.sparks(this.p.x + Math.sin(a.yaw) * s.radius * 0.7, 1.2, this.p.z + Math.cos(a.yaw) * s.radius * 0.7, s.finisher ? 22 : 10); }
   }
 
   // ───────────────────────── per-frame simulation ─────────────────────────
@@ -1037,6 +1050,7 @@ export class Game {
       for (const e of [...this.enemies]) this.stepEnemy(e, dt);
       this.enemies = this.enemies.filter((e) => !e.dead);
       this.stepBolts(dt);
+      this.feedTrails();
       this.stepRooms();
       this.drawTethers();
       this.fx.update(dt);
@@ -1052,7 +1066,12 @@ export class Game {
     this.camPos.lerp(new THREE.Vector3(this.p.x, 0, this.p.z), 1 - Math.exp(-real * 7));
     this.trauma = Math.max(0, this.trauma - real * 1.7);
     const amp = this.trauma * this.trauma * 0.7;
-    const sx = (Math.random() - 0.5) * 2 * amp, sz = (Math.random() - 0.5) * 2 * amp;
+    let sx = (Math.random() - 0.5) * 2 * amp, sz = (Math.random() - 0.5) * 2 * amp;
+    const damp = Math.exp(-real * 16);
+    this.punch.x *= damp; this.punch.z *= damp; this.zoomPulse *= Math.exp(-real * 10);
+    sx += this.punch.x; sz += this.punch.z;
+    const zp = 1 + this.zoomPulse;
+    if (Math.abs(this.camera.zoom - zp) > 1e-4) { this.camera.zoom = zp; this.camera.updateProjectionMatrix(); }
     this.camera.position.set(this.camPos.x + CAM_OFFSET.x + sx, CAM_OFFSET.y, this.camPos.z + CAM_OFFSET.z + sz);
     this.camera.lookAt(this.camPos.x + sx, 0, this.camPos.z + sz);
 

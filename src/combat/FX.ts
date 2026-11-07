@@ -27,6 +27,63 @@ export class Telegraph {
   constructor(g: THREE.Group, ring: THREE.Mesh, disc: THREE.Mesh) { this.group = g; this.ring = ring; this.disc = disc; }
 }
 
+/** Swing trail: a fading ribbon through recent blade positions (newest first). */
+class Ribbon {
+  private static N = 22;
+  private static LIFE = 0.2;
+  private pos = new Float32Array(Ribbon.N * 2 * 3);
+  private al = new Float32Array(Ribbon.N * 2);
+  private uv = new Float32Array(Ribbon.N * 2);
+  private samples: Array<{ b: THREE.Vector3; t: THREE.Vector3; age: number }> = [];
+  private color = new THREE.Color(1, 1, 1);
+  readonly mesh: THREE.Mesh;
+  private mat: THREE.ShaderMaterial;
+  constructor() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aA', new THREE.BufferAttribute(this.al, 1).setUsage(THREE.DynamicDrawUsage));
+    for (let i = 0; i < Ribbon.N; i++) { this.uv[i * 2] = 0; this.uv[i * 2 + 1] = 1; }
+    g.setAttribute('aU', new THREE.BufferAttribute(this.uv, 1));
+    const idx: number[] = [];
+    for (let i = 0; i < Ribbon.N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    g.setIndex(idx); g.setDrawRange(0, 0);
+    this.mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uColor: { value: this.color } },
+      vertexShader: 'attribute float aA; attribute float aU; varying float vA; varying float vU; void main(){ vA=aA; vU=aU; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+      fragmentShader: 'uniform vec3 uColor; varying float vA; varying float vU; void main(){ float e=smoothstep(0.0,0.35,vU)*(1.0-smoothstep(0.9,1.0,vU)*0.4); vec3 c=mix(uColor,vec3(1.0),smoothstep(0.55,1.0,vU)*0.8)*1.5; gl_FragColor=vec4(c,vA*vA*e*0.9); }',
+    });
+    this.mesh = new THREE.Mesh(g, this.mat); this.mesh.frustumCulled = false; this.mesh.renderOrder = 9;
+  }
+  push(base: THREE.Vector3, tip: THREE.Vector3, color: number): void {
+    this.color.set(color);
+    const b = base.clone().lerp(tip, 0.3);
+    const last = this.samples[0];
+    if (last && last.age < 0.02 && last.t.distanceToSquared(tip) < 0.0009) return;
+    // fill the gap with in-between samples when the blade moved far in one frame
+    if (last && last.age < 0.08) {
+      const steps = Math.min(3, Math.floor(last.t.distanceTo(tip) / 0.45));
+      for (let i = 1; i <= steps; i++) { const k = i / (steps + 1); this.samples.unshift({ b: last.b.clone().lerp(b, k), t: last.t.clone().lerp(tip, k), age: last.age * (1 - k) }); }
+    }
+    this.samples.unshift({ b, t: tip.clone(), age: 0 });
+    if (this.samples.length > Ribbon.N) this.samples.length = Ribbon.N;
+  }
+  update(dt: number): void {
+    for (const s of this.samples) s.age += dt;
+    while (this.samples.length && this.samples[this.samples.length - 1].age > Ribbon.LIFE) this.samples.pop();
+    const n = this.samples.length, g = this.mesh.geometry;
+    this.mesh.visible = n > 1;
+    if (n < 2) return;
+    for (let i = 0; i < n; i++) {
+      const s = this.samples[i], a = 1 - s.age / Ribbon.LIFE;
+      this.pos.set([s.b.x, s.b.y, s.b.z, s.t.x, s.t.y, s.t.z], i * 6); this.al[i * 2] = a; this.al[i * 2 + 1] = a;
+    }
+    g.setDrawRange(0, (n - 1) * 6);
+    (g.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    (g.getAttribute('aA') as THREE.BufferAttribute).needsUpdate = true;
+  }
+}
+
 export class FX {
   readonly group = new THREE.Group();
   // CPU particle pool rendered as one Points draw call
@@ -48,8 +105,10 @@ export class FX {
   private beams: Array<{ line: THREE.Line; busy: boolean; pts: THREE.Vector3[] }> = [];
   private glyphTex = glyphTexture();
   private time = 0;
+  private trails: Ribbon[] = [new Ribbon(), new Ribbon()];
 
   constructor() {
+    for (const t of this.trails) this.group.add(t.mesh);
     // particles
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pPos, 3).setUsage(THREE.DynamicDrawUsage));
@@ -210,8 +269,25 @@ export class FX {
     return true;
   }
 
+  /** Feed the current blade segment of weapon `slot` into its swing trail. */
+  trailPush(slot: number, base: THREE.Vector3, tip: THREE.Vector3, color: number): void { this.trails[slot]?.push(base, tip, color); }
+
+  /** Directional hit impact: flash, sparks thrown along the blow, and a small ring. */
+  impact(x: number, y: number, z: number, dx: number, dz: number, color: number, power = 1): void {
+    const white = new THREE.Color(1, 1, 1), c = new THREE.Color(color).lerp(white, 0.5), base = Math.atan2(dz, dx);
+    this.spawn(x, y, z, 0, 0, 0, 0.1, 54 * power, white, 0);
+    this.spawn(x, y, z, 0, 0, 0, 0.16, 34 * power, c, 0);
+    const n = Math.round(9 * power);
+    for (let i = 0; i < n; i++) {
+      const a = base + (Math.random() - 0.5) * 1.3, s = (8 + Math.random() * 9) * (0.8 + power * 0.2);
+      this.spawn(x, y, z, Math.cos(a) * s, 1 + Math.random() * 4, Math.sin(a) * s, 0.22 + Math.random() * 0.2, 5 + Math.random() * 4, i % 3 ? c : white, 14);
+    }
+    this.shockwave(x, z, color, 0.8 + power * 0.7, 0.18, y);
+  }
+
   update(dt: number): void {
     this.time += dt;
+    for (const t of this.trails) t.update(dt);
     // beams are re-requested every frame
     for (const b of this.beams) { if (!b.busy) b.line.visible = false; b.busy = false; }
 

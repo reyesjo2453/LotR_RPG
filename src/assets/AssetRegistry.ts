@@ -70,6 +70,18 @@ export function mergeToGeometry(group: THREE.Object3D, keepUV = false): THREE.Bu
   return merged;
 }
 
+/** Signed length of a weapon node along its local Y axis (grip at the origin, blade the longer side). */
+function bladeLength(node: THREE.Object3D): number {
+  let lo = 0, hi = 0;
+  node.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.geometry.computeBoundingBox();
+    const b = m.geometry.boundingBox!; lo = Math.min(lo, b.min.y); hi = Math.max(hi, b.max.y);
+  });
+  return hi >= -lo ? hi : lo;
+}
+
 class MixerAnimator implements Animator {
   readonly root = new THREE.Group();
   readonly height: number;
@@ -78,6 +90,7 @@ class MixerAnimator implements Animator {
   private current: THREE.AnimationAction | null = null;
   private shotTime = 0;
   private speed = 0;
+  private swords: Array<{ node: THREE.Object3D; len: number; out: [THREE.Vector3, THREE.Vector3] }> = [];
 
   constructor(asset: CharacterAsset, id: CharacterId) {
     const model = cloneSkinned(asset.scene) as THREE.Group;
@@ -88,7 +101,7 @@ class MixerAnimator implements Animator {
       const f = /Hand(Thumb|Index|Middle|Ring|Pinky)\d$/.exec(o.name);
       if (f) o.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), f[1] === 'Thumb' ? 0 : 1.22));
       const w = /^sword_(Left|Right)Hand$/.exec(o.name);
-      if (w) { o.position.set(0, 0.03, 0); o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(w[1] === 'Left' ? -1 : 1, 0, 0)); }
+      if (w) { this.swords.push({ node: o, len: bladeLength(o), out: [new THREE.Vector3(), new THREE.Vector3()] }); o.position.set(0, 0.03, 0); o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(w[1] === 'Left' ? -1 : 1, 0, 0)); }
     });
     this.root.add(model);
     this.height = TARGET_HEIGHT[id];
@@ -127,6 +140,10 @@ class MixerAnimator implements Animator {
     this.current = a;
   }
   setMoveSpeed(v: number): void { this.speed = v; }
+  blades(): Array<[THREE.Vector3, THREE.Vector3]> {
+    this.root.updateWorldMatrix(true, true);
+    return this.swords.map((sw) => { sw.out[0].set(0, 0, 0); sw.out[1].set(0, sw.len, 0); sw.node.localToWorld(sw.out[0]); sw.node.localToWorld(sw.out[1]); return sw.out; });
+  }
   play(state: OneShot, duration?: number): void {
     const a = this.actions[state] ?? (state === 'combo' || state === 'stab' || state.startsWith('swing') ? this.actions.slash : undefined);
     if (!a) return;

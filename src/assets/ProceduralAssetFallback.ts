@@ -12,6 +12,8 @@ export interface Animator {
   setMoveSpeed(v: number): void;
   play(state: OneShot, duration?: number): void;
   update(dt: number): void;
+  /** World-space [base, tip] of each weapon blade (for the swing trail); only rigs with weapon nodes implement it. */
+  blades?(): Array<[THREE.Vector3, THREE.Vector3]>;
 }
 
 const matCache = new Map<string, THREE.MeshLambertMaterial>();
