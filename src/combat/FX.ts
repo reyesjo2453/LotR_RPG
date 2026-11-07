@@ -30,7 +30,7 @@ export class Telegraph {
 /** Swing trail: a fading ribbon through recent blade positions (newest first). */
 class Ribbon {
   private static N = 22;
-  private static LIFE = 0.2;
+  private static LIFE = 0.13;
   private pos = new Float32Array(Ribbon.N * 2 * 3);
   private al = new Float32Array(Ribbon.N * 2);
   private uv = new Float32Array(Ribbon.N * 2);
@@ -51,13 +51,13 @@ class Ribbon {
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
       uniforms: { uColor: { value: this.color } },
       vertexShader: 'attribute float aA; attribute float aU; varying float vA; varying float vU; void main(){ vA=aA; vU=aU; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-      fragmentShader: 'uniform vec3 uColor; varying float vA; varying float vU; void main(){ float e=smoothstep(0.0,0.35,vU)*(1.0-smoothstep(0.9,1.0,vU)*0.4); vec3 c=mix(uColor,vec3(1.0),smoothstep(0.55,1.0,vU)*0.8)*1.5; gl_FragColor=vec4(c,vA*vA*e*0.9); }',
+      fragmentShader: 'uniform vec3 uColor; varying float vA; varying float vU; void main(){ float e=smoothstep(0.0,0.35,vU)*(1.0-smoothstep(0.9,1.0,vU)*0.4); vec3 c=mix(uColor,vec3(1.0),smoothstep(0.55,1.0,vU)*0.8)*1.1; gl_FragColor=vec4(c,vA*vA*e*0.4); }',
     });
     this.mesh = new THREE.Mesh(g, this.mat); this.mesh.frustumCulled = false; this.mesh.renderOrder = 9;
   }
   push(base: THREE.Vector3, tip: THREE.Vector3, color: number): void {
     this.color.set(color);
-    const b = base.clone().lerp(tip, 0.3);
+    const b = base.clone().lerp(tip, 0.6);
     const last = this.samples[0];
     if (last && last.age < 0.02 && last.t.distanceToSquared(tip) < 0.0009) return;
     // fill the gap with in-between samples when the blade moved far in one frame
@@ -135,7 +135,7 @@ export class FX {
           void main(){ float a=(atan(vP.y,vP.x)+uArc*0.5)/uArc; float r=length(vP.xy);
             float head=uT*1.5; float tail=clamp(1.0-(head-a)/0.75,0.0,1.0)*step(a,head);
             float rad=smoothstep(0.45,0.8,r)*(1.0-smoothstep(0.93,1.0,r)*0.5);
-            float al=tail*rad*(1.0-uT*uT); gl_FragColor=vec4(mix(uColor,vec3(1.0),tail*0.45)*1.4,al*0.95); }`,
+            float al=tail*rad*(1.0-uT*uT); gl_FragColor=vec4(mix(uColor,vec3(1.0),tail*0.45)*1.3,al*0.5); }`,
       });
       const mesh = new THREE.Mesh(arcGeo, mat); mesh.rotation.x = -Math.PI / 2; mesh.position.y = 0.45; mesh.frustumCulled = false;
       const g2 = new THREE.Group(); g2.add(mesh); g2.visible = false; g2.renderOrder = 9; this.group.add(g2);

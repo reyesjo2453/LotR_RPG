@@ -4,6 +4,7 @@ import type { EnvPropId } from '../assets/ProceduralAssetFallback';
 import { createToonMaterial, sharedUniforms } from '../shaders/ToonRealm';
 import { GRID, TILE, TileType, tileToWorld, type Dungeon, type Room, type Vec2 } from './ProceduralDungeonGenerator';
 import { realm } from './RealmManager';
+import { BlobShadows, radialTexture } from './Shadows';
 
 const NUM_LIGHTS = 4;
 const EMBERS_PER_SLOT = 36;
@@ -33,6 +34,11 @@ export class DungeonInstancer {
   private emberCenters: THREE.Vector3[];
   private emberMat: THREE.ShaderMaterial;
   private lightTimer = 0;
+  private pools!: THREE.InstancedMesh;
+  private halos!: THREE.Points;
+  private haloMat!: THREE.PointsMaterial;
+  private poolMat!: THREE.MeshBasicMaterial;
+  private haloBase = 120;
   private flickerSeed: number[] = [];
   private owned: Array<{ dispose(): void }> = [];
   drawCalls = 0;
@@ -62,7 +68,7 @@ export class DungeonInstancer {
     const floorGeo = own(new THREE.BoxGeometry(TILE, 0.4, TILE).translate(0, -0.2, 0));
     const floorVariants = ['floor_a', 'floor_b'].map((n, v) => {
       const map = tex(n);
-      const mat = own(lit(createToonMaterial({ color: 0xffffff, map, veins: 1, rim: 0.4 }), map, 0.38));
+      const mat = own(lit(createToonMaterial({ color: 0xffffff, map, veins: 1, rim: 0.4, band: 0.2 }), map, 0.6));
       const tiles = floorTiles.filter((idx) => ((hash(idx % GRID, (idx / GRID) | 0) * 7) | 0) % 2 === v);
       return { mat, tiles };
     });
@@ -78,7 +84,7 @@ export class DungeonInstancer {
     // wall segments
     const wallGeo = own(new THREE.BoxGeometry(TILE, 2.4, TILE).translate(0, 0.8, 0));
     const wallMap = tex('wall');
-    const wallMat = own(lit(createToonMaterial({ color: 0xffffff, map: wallMap, rim: 0.7 }), wallMap, 0.3));
+    const wallMat = own(lit(createToonMaterial({ color: 0xffffff, map: wallMap, rim: 0.7, band: 0.2 }), wallMap, 0.5));
     const walls = add(new THREE.InstancedMesh(wallGeo, wallMat, wallTiles.length));
     wallTiles.forEach((idx, n) => {
       const x = idx % GRID, y = (idx / GRID) | 0, h = hash(y, x);
@@ -101,7 +107,7 @@ export class DungeonInstancer {
     const propFor = (id: EnvPropId): [THREE.BufferGeometry, THREE.Material] => {
       const geo = assets.getEnvGeometry(id), map = assets.getEnvMap(id);
       if (!map) return [geo, vcMat];
-      const m = own(createToonMaterial({ map, rim: 1 })) as THREE.MeshLambertMaterial;
+      const m = own(createToonMaterial({ map, rim: 1, band: 0.5 })) as THREE.MeshLambertMaterial;
       m.emissiveMap = map; m.emissive = new THREE.Color(1, 1, 1); m.emissiveIntensity = 0.4; // keep dark art readable
       return [geo, m];
     };
@@ -135,6 +141,25 @@ export class DungeonInstancer {
     disc.scale.set(1, 1, 1);
     disc.visible = false;
     this.portalMeshes = [gateMesh, disc];
+
+    // grounding: contact shadows under every prop, warm light pools and glow halos around fires and runes
+    const sh = new BlobShadows(Math.max(1, pillars.length + this.braziers.length + monos.length + 1), 0.55);
+    sh.begin();
+    pillars.forEach((p) => sh.add(p.x, p.z, 1.05));
+    this.braziers.forEach((p) => sh.add(p.x, p.z, 0.85));
+    monos.forEach(({ p }) => sh.add(p.x, p.z, 1.2));
+    sh.end(); this.group.add(sh.mesh); this.drawCalls++; own(sh);
+    this.poolMat = own(new THREE.MeshBasicMaterial({ map: radialTexture(), color: 0xffa050, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.pools = add(new THREE.InstancedMesh(own(new THREE.PlaneGeometry(2, 2)), this.poolMat, Math.max(1, this.braziers.length)));
+    this.pools.count = this.braziers.length; this.pools.renderOrder = 1;
+    this.braziers.forEach((p, i) => this.pools.setMatrixAt(i, _m.compose(_p.set(p.x, 0.035, p.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)), _s.set(3.4, 3.4, 3.4))));
+    const hp: number[] = [];
+    this.braziers.forEach((p) => hp.push(p.x, 1.35, p.z));
+    monos.forEach(({ p }) => hp.push(p.x, 1.8, p.z));
+    const hg = own(new THREE.BufferGeometry()); hg.setAttribute('position', new THREE.Float32BufferAttribute(hp, 3));
+    this.haloMat = own(new THREE.PointsMaterial({ map: radialTexture(), color: 0xffa050, size: 120, sizeAttenuation: false, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.halos = new THREE.Points(hg, this.haloMat); this.halos.frustumCulled = false; this.halos.renderOrder = 10;
+    this.group.add(this.halos); this.drawCalls++;
 
     // torch lights
     for (let i = 0; i < NUM_LIGHTS; i++) {
@@ -179,7 +204,7 @@ export class DungeonInstancer {
     this.drawCalls++;
   }
 
-  setPixelRatio(pr: number): void { this.emberMat.uniforms.uSize.value = 5 * pr; }
+  setPixelRatio(pr: number): void { this.emberMat.uniforms.uSize.value = 5 * pr; this.haloBase = 120 * pr; this.haloMat.size = this.haloBase; }
 
   setPortalActive(on: boolean): void { for (const o of this.portalMeshes) o.visible = on; }
 
@@ -211,6 +236,11 @@ export class DungeonInstancer {
       }
     }
     const t = sharedUniforms.uTime.value;
+    { // fire glow breathes; it shifts from amber to spectral teal with the realm
+      const fl = 0.85 + 0.15 * Math.sin(t * 7.1) * Math.sin(t * 3.7);
+      this.poolMat.color.setHex(0xffa050).lerp(new THREE.Color(0x3fffd0), b); this.poolMat.opacity = 0.5 * fl;
+      this.haloMat.color.setHex(0xffa050).lerp(new THREE.Color(0x7affd0), b); this.haloMat.opacity = 0.5 * fl; this.haloMat.size = this.haloBase * (0.95 + 0.1 * fl);
+    }
     const warm = new THREE.Color(0xff9a45), cold = new THREE.Color(0x4fffd0);
     for (let i = 0; i < NUM_LIGHTS; i++) {
       const l = this.lights[i];

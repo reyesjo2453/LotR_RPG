@@ -27,7 +27,7 @@ diffuseColor.a = 1.0;
 vec3 col = outgoingLight;
 float lum = dot(col, vec3(0.299,0.587,0.114));
 float ql = floor(clamp(lum,0.0,1.3)*3.0+0.5)/3.0;   // crisp 3-step cel bands
-col *= (ql+0.07)/(lum+0.07);
+col *= mix(1.0, (ql+0.07)/(lum+0.07), uBand);
 float un = uRealmBlend;
 vec3 seenC = col * vec3(1.08,0.97,0.86);
 float g = dot(col, vec3(0.299,0.587,0.114));
@@ -47,6 +47,8 @@ gl_FragColor = vec4(col, diffuseColor.a);
 export interface ToonOpts {
   color?: THREE.ColorRepresentation;
   veins?: number;
+  /** 1 = full 3-step cel banding, lower keeps more of a painted texture's detail */
+  band?: number;
   rim?: number;
   vertexColors?: boolean;
   transparent?: boolean;
@@ -58,12 +60,13 @@ export interface ToonOpts {
 }
 
 /** Attach the Toon + Rim + uRealmBlend injection to any MeshLambertMaterial (instanced, skinned or plain). */
-export function injectRealmShader(mat: THREE.MeshLambertMaterial, veins = 0, rim = 1): THREE.MeshLambertMaterial {
+export function injectRealmShader(mat: THREE.MeshLambertMaterial, veins = 0, rim = 1, band = 1): THREE.MeshLambertMaterial {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uRealmBlend = sharedUniforms.uRealmBlend;
     shader.uniforms.uTime = sharedUniforms.uTime;
     shader.uniforms.uVein = { value: veins };
     shader.uniforms.uRim = { value: rim };
+    shader.uniforms.uBand = { value: band };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <project_vertex>', `#include <project_vertex>
@@ -73,7 +76,7 @@ export function injectRealmShader(mat: THREE.MeshLambertMaterial, veins = 0, rim
         #endif
         vWPos = (modelMatrix * wp4).xyz;`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nuniform float uRealmBlend; uniform float uTime; uniform float uVein; uniform float uRim;\n${VORONOI}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nuniform float uRealmBlend; uniform float uTime; uniform float uVein; uniform float uRim; uniform float uBand;\n${VORONOI}`)
       .replace('#include <opaque_fragment>', GRADE);
   };
   mat.customProgramCacheKey = () => 'toonrealm';
@@ -91,7 +94,7 @@ export function createToonMaterial(o: ToonOpts = {}): THREE.MeshLambertMaterial 
     map: o.map ?? null,
     side: o.side ?? THREE.FrontSide,
   });
-  return injectRealmShader(mat, o.veins ?? 0, o.rim ?? 1);
+  return injectRealmShader(mat, o.veins ?? 0, o.rim ?? 1, o.band ?? 1);
 }
 
 /** Convert imported glTF materials so characters share the same toon/realm look. */

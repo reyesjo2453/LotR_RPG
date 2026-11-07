@@ -1,3 +1,4 @@
+import { BlobShadows } from './world/Shadows';
 import * as THREE from 'three';
 import { gsap } from 'gsap';
 import { assets } from './assets/AssetRegistry';
@@ -61,6 +62,8 @@ export class Game {
   private hemi = new THREE.HemisphereLight(0xd6c9bb, 0x2a2434, 0.9);
   private sun = new THREE.DirectionalLight(0xffe8c8, 0.8);
   private enemyLayer = new THREE.Group();
+  private shadows = new BlobShadows(64, 0.6);
+  private heroLight = new THREE.PointLight(0xffe2b8, 9, 9, 1.5);
   private raycaster = new THREE.Raycaster();
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
@@ -95,9 +98,9 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.autoClear = false;
     this.scene.background = new THREE.Color(0x07060a);
-    this.scene.fog = new THREE.Fog(0x07060a, 45, 90);
+    this.scene.fog = new THREE.Fog(0x07060a, 40, 66); // camera sits 40 away: the far (upper) part of the screen fades into the dark
     this.sun.position.set(-6, 14, 4);
-    this.scene.add(this.hemi, this.sun, this.fx.group, this.enemyLayer, this.p.root);
+    this.scene.add(this.hemi, this.sun, this.heroLight, this.shadows.mesh, this.fx.group, this.enemyLayer, this.p.root);
 
     this.input = new InputManager(canvas);
     this.hud = new HUDManager(uiRoot, { onSwap: (i) => this.input.requestSwap(i), onNewSeed: () => this.input.requestNewSeed(), onTutorial: () => this.restartTutorial() });
@@ -967,6 +970,17 @@ export class Game {
     }
   }
 
+  /** Hero key light + contact shadows for the player and every living enemy. */
+  private updateLighting(): void {
+    const p = this.p, b = realm.uRealmBlend;
+    this.heroLight.position.set(p.x - 0.8, 2.6, p.z + 0.8);
+    this.heroLight.color.setHex(0xffe2b8).lerp(new THREE.Color(0x9fe8ff), b);
+    this.shadows.begin();
+    this.shadows.add(p.x, p.z, 0.75);
+    for (const e of this.enemies) if (!e.dead) this.shadows.add(e.x, e.z, e.radius * 1.5);
+    this.shadows.end();
+  }
+
   private updateEnvironment(): void {
     const b = realm.uRealmBlend;
     sharedUniforms.uRealmBlend.value = b; sharedUniforms.uTime.value = this.time;
@@ -1061,6 +1075,7 @@ export class Game {
     });
     this.updateEnvironment();
     this.inst.update(real, this.p);
+    this.updateLighting();
 
     // camera: smooth follow + trauma shake
     this.camPos.lerp(new THREE.Vector3(this.p.x, 0, this.p.z), 1 - Math.exp(-real * 7));
