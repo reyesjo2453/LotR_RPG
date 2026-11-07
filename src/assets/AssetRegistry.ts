@@ -11,7 +11,7 @@ import { toonifyObject } from '../shaders/ToonRealm';
 
 const CHARACTERS: CharacterId[] = ['vaelen', 'seraphina', 'kaelen', 'castellan_knight', 'barrow_hound'];
 const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runestone_monolith', 'bridge_broken', 'archway_gate', 'wall_corner', 'wall_alcove', 'floor_edge',
-  'pillar_broken', 'rubble_pile', 'pillar_fallen', 'pedestal_cracked', 'statue_knight', 'arch_fragment', 'sarcophagus', 'altar_offering', 'obelisk_rune', 'coffin_open', 'offering_bowl', 'arch_spectral', 'brazier_blue', 'barrels_stack', 'throne_stone', 'cage_iron'];
+  'pillar_broken', 'rubble_pile', 'pillar_fallen', 'pedestal_cracked', 'statue_knight', 'arch_fragment', 'sarcophagus', 'altar_offering', 'obelisk_rune', 'coffin_open', 'offering_bowl', 'arch_spectral', 'brazier_blue', 'barrels_stack', 'throne_stone', 'cage_iron', 'wall_torch_sconce'];
 const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit', 'combo', 'stab', 'dodge'] as const;
 const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8, kaelen: 1.55, castellan_knight: 2.7, barrow_hound: 1.05 };
 
@@ -35,7 +35,7 @@ function trimClip(clip: THREE.AnimationClip, name: string, t0: number, t1: numbe
 }
 
 /** Target size of imported props (world units), matched to the procedural kit they replace. */
-const ENV_FIT: Partial<Record<EnvPropId, { h?: number; box?: [number, number, number]; sink?: number }>> = {
+const ENV_FIT: Partial<Record<EnvPropId, { h?: number; box?: [number, number, number]; sink?: number; wall?: boolean }>> = {
   pillar_elven: { h: 3.75 },
   brazier_iron: { h: 1.45 },
   runestone_monolith: { h: 3.4 },
@@ -45,6 +45,7 @@ const ENV_FIT: Partial<Record<EnvPropId, { h?: number; box?: [number, number, nu
   pillar_broken: { h: 2.3 }, rubble_pile: { h: 1.1 }, pillar_fallen: { h: 0.8 }, pedestal_cracked: { h: 1.0 }, statue_knight: { h: 1.7 },
   arch_fragment: { h: 2.6 }, sarcophagus: { h: 1.1 }, altar_offering: { h: 1.0 }, obelisk_rune: { h: 2.4 }, coffin_open: { h: 0.9 },
   offering_bowl: { h: 1.0 }, arch_spectral: { h: 3.0 }, brazier_blue: { h: 1.45 }, barrels_stack: { h: 0.95 }, throne_stone: { h: 2.0 }, cage_iron: { h: 1.5 },
+  wall_torch_sconce: { h: 0.573, wall: true }, // wall-mounted: x/y centred, back plate left at z=0 and the piece projects toward +z
   bridge_broken: { box: [2.5, 0.3, 2.5], sink: 0.3 }, // one tile, top flush with the floor
 };
 
@@ -308,8 +309,8 @@ class AssetRegistry {
       // normalise imported props to the size and footprint of the procedural kit
       if (this.env.has(id)) {
         g.computeBoundingBox(); let bb = g.boundingBox!;
-        g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
         const fit = ENV_FIT[id];
+        g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, fit?.wall ? -bb.min.z : -(bb.min.z + bb.max.z) / 2);
         if (fit?.h) g.scale(fit.h / (bb.max.y - bb.min.y), fit.h / (bb.max.y - bb.min.y), fit.h / (bb.max.y - bb.min.y));
         else if (fit?.box) g.scale(fit.box[0] / (bb.max.x - bb.min.x), fit.box[1] / (bb.max.y - bb.min.y), fit.box[2] / (bb.max.z - bb.min.z));
         if (fit?.sink) g.translate(0, -fit.sink, 0);

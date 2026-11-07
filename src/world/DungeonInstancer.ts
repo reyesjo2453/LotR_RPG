@@ -263,12 +263,16 @@ export class DungeonInstancer {
     // wall torches: iron bracket + cup, and an emissive flame that follows the realm colour
     if (this.torches.length) {
       const nT = this.torches.length;
-      const bracket = own(mergeGeometries([
-        new THREE.BoxGeometry(0.1, 0.1, 0.34).translate(0, 1.3, -0.1),
-        new THREE.CylinderGeometry(0.13, 0.08, 0.2, 8).translate(0, 1.42, 0.08),
-      ])!);
-      const bm2 = add(new THREE.InstancedMesh(bracket, own(createToonMaterial({ color: 0x2a2622, rim: 0.4, emissive: 0x000000 })), nT));
-      const flameGeo = own(new THREE.ConeGeometry(0.13, 0.42, 7).translate(0, 1.76, 0.08));
+      // painted sconce GLB when present (back plate on the wall, torch head at the flame), else the old box + cup bracket
+      const sconce = assets.hasEnv('wall_torch_sconce');
+      const [bracket, bracketMat] = sconce
+        ? ((): [THREE.BufferGeometry, THREE.Material] => { const [g, m] = propFor('wall_torch_sconce'); return [own(g.clone().translate(0, 1.03, -0.27)), m]; })()
+        : [own(mergeGeometries([
+          new THREE.BoxGeometry(0.1, 0.1, 0.34).translate(0, 1.3, -0.1),
+          new THREE.CylinderGeometry(0.13, 0.08, 0.2, 8).translate(0, 1.42, 0.08),
+        ])!), own(createToonMaterial({ color: 0x2a2622, rim: 0.4, emissive: 0x000000 }))];
+      const bm2 = add(new THREE.InstancedMesh(bracket, bracketMat, nT));
+      const flameGeo = own(sconce ? new THREE.ConeGeometry(0.1, 0.4, 7).translate(0, 1.79, 0) : new THREE.ConeGeometry(0.13, 0.42, 7).translate(0, 1.76, 0.08));
       this.flameMat = own(new THREE.MeshBasicMaterial({ color: 0xffa83a }));
       const fm = add(new THREE.InstancedMesh(flameGeo, this.flameMat, nT));
       this.torches.forEach((t, i) => { put(bm2, i, t.x, 0, t.z, t.yaw); put(fm, i, t.x, 0, t.z, t.yaw); });
