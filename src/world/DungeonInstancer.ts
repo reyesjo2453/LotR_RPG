@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { assets } from '../assets/AssetRegistry';
 import type { EnvPropId } from '../assets/ProceduralAssetFallback';
 import { createToonMaterial, sharedUniforms } from '../shaders/ToonRealm';
@@ -6,7 +7,7 @@ import { GRID, TILE, TileType, tileToWorld, type Dungeon, type Room, type Vec2 }
 import { realm } from './RealmManager';
 import { BlobShadows, radialTexture } from './Shadows';
 
-const NUM_LIGHTS = 4;
+const NUM_LIGHTS = 5;
 const EMBERS_PER_SLOT = 36;
 
 export interface MonolithRef { pos: Vec2; room: Room; index: number; alive: boolean; hp: number; maxHp: number }
@@ -48,6 +49,10 @@ export class DungeonInstancer {
   private ghostMeshes: THREE.InstancedMesh[] = [];
   private decorShadows: Array<{ x: number; z: number; r: number }> = [];
   private slabAt = new THREE.Vector2(1e9, 1e9);
+  /** wall torches: x,z of the flame, wall-normal yaw */
+  private lightSrc: Array<{ x: number; y: number; z: number }> = [];
+  readonly torches: Array<{ x: number; z: number; yaw: number }> = [];
+  private flameMat!: THREE.MeshBasicMaterial;
 
   constructor(readonly dungeon: Dungeon) {
     const d = dungeon;
@@ -98,28 +103,47 @@ export class DungeonInstancer {
     };
     // walls: a solid core per tile, dressed with painted facade slabs on every face that borders open ground
     const facade = assets.hasEnv('wall_segment');
-    const wallGeo = own(new THREE.BoxGeometry(TILE, 2.4, TILE).translate(0, facade ? 0.5 : 0.8, 0));
-    const wallMap = tex('wall');
-    const wallMat = own(lit(createToonMaterial({ color: 0xffffff, map: wallMap, rim: 0.7, band: 0.2 }), wallMap, 0.5));
-    const walls = add(new THREE.InstancedMesh(wallGeo, wallMat, wallTiles.length));
-    wallTiles.forEach((idx, n) => {
-      const x = idx % GRID, y = (idx / GRID) | 0, h = hash(y, x);
-      put(walls, n, tileToWorld(x), 0, tileToWorld(y));
-      walls.setColorAt(n, c.setScalar(0.78 + h * 0.18));
-    });
     const walkable = (x: number, y: number) => {
       if (x < 0 || y < 0 || x >= GRID || y >= GRID) return false;
       const t = d.grid[y * GRID + x];
       return t === TileType.FLOOR || t === TileType.PORTAL || t === TileType.SPECTRAL_BRIDGE;
     };
+    // Cutaway: the camera looks toward -x,-z, so walls with open floor on their +x/+z side (the far walls) stay tall and
+    // show their painted faces; every other wall is cut down to a capped ledge so the room interior is visible.
+    const isTall = (x: number, y: number) => walkable(x + 1, y) || walkable(x, y + 1) || walkable(x + 1, y + 1);
+    const tallTiles = wallTiles.filter((i) => isTall(i % GRID, (i / GRID) | 0));
+    const lowTiles = wallTiles.filter((i) => !isTall(i % GRID, (i / GRID) | 0));
+    const wallGeo = own(new THREE.BoxGeometry(TILE, 2.4, TILE).translate(0, facade ? 0.5 : 0.8, 0));
+    const ledgeGeo = own(mergeGeometries([
+      new THREE.BoxGeometry(TILE, 1.0, TILE).translate(0, 0.0, 0),
+      new THREE.BoxGeometry(TILE + 0.1, 0.16, TILE + 0.1).translate(0, 0.58, 0),
+    ])!);
+    const wallMap = tex('wall');
+    const wallMat = own(lit(createToonMaterial({ color: 0xffffff, map: wallMap, rim: 0.7, band: 0.2 }), wallMap, 0.5));
+    const walls = add(new THREE.InstancedMesh(wallGeo, wallMat, tallTiles.length));
+    tallTiles.forEach((idx, n) => {
+      const x = idx % GRID, y = (idx / GRID) | 0, h = hash(y, x);
+      put(walls, n, tileToWorld(x), 0, tileToWorld(y));
+      walls.setColorAt(n, c.setScalar(0.78 + h * 0.18));
+    });
+    if (lowTiles.length) {
+      const ledge = add(new THREE.InstancedMesh(ledgeGeo, wallMat, lowTiles.length));
+      lowTiles.forEach((idx, n) => {
+        const x = idx % GRID, y = (idx / GRID) | 0, h = hash(y, x);
+        put(ledge, n, tileToWorld(x), 0, tileToWorld(y));
+        ledge.setColorAt(n, c.setScalar(0.95 + h * 0.2));
+      });
+    }
     const faces: Array<{ x: number; z: number; yaw: number; alcove: boolean; h: number }> = [];
     const slabOut = TILE / 2 + 0.2 - 0.225; // the brick plane sits ~0.2 behind the slab's outer edge, so push the slab out until it clears the core box
-    for (const idx of facade ? wallTiles : []) {
+    for (const idx of facade ? tallTiles : []) {
       const x = idx % GRID, y = (idx / GRID) | 0;
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      for (const [dx, dz] of [[1, 0], [0, 1]]) { // only the camera-facing (room-interior) faces are ever seen
         if (!walkable(x + dx, y + dz)) continue;
         const h = hash(x * 3 + dx * 7, y * 5 + dz * 11);
-        faces.push({ x: tileToWorld(x) + dx * slabOut, z: tileToWorld(y) + dz * slabOut, yaw: Math.atan2(dx, dz), alcove: h < 0.12 && assets.hasEnv('wall_alcove'), h });
+        const alcove = h < 0.12 && assets.hasEnv('wall_alcove');
+        faces.push({ x: tileToWorld(x) + dx * slabOut, z: tileToWorld(y) + dz * slabOut, yaw: Math.atan2(dx, dz), alcove, h });
+        if (!alcove && h > 0.12 && h < 0.3 && (x + y) % 2 === 0) this.torches.push({ x: tileToWorld(x) + dx * (TILE / 2 + 0.3), z: tileToWorld(y) + dz * (TILE / 2 + 0.3), yaw: Math.atan2(dx, dz) });
       }
     }
     // Only slabs near the player are drawn (re-selected a few times a second): bounds the triangle load on phones.
@@ -199,12 +223,27 @@ export class DungeonInstancer {
     monos.forEach(({ p }) => sh.add(p.x, p.z, 1.2));
     this.decorShadows.forEach((q) => sh.add(q.x, q.z, q.r * 1.5));
     sh.end(); this.group.add(sh.mesh); this.drawCalls++; own(sh);
+    // wall torches: iron bracket + cup, and an emissive flame that follows the realm colour
+    if (this.torches.length) {
+      const nT = this.torches.length;
+      const bracket = own(mergeGeometries([
+        new THREE.BoxGeometry(0.1, 0.1, 0.34).translate(0, 1.3, -0.1),
+        new THREE.CylinderGeometry(0.13, 0.08, 0.2, 8).translate(0, 1.42, 0.08),
+      ])!);
+      const bm2 = add(new THREE.InstancedMesh(bracket, own(createToonMaterial({ color: 0x2a2622, rim: 0.4, emissive: 0x000000 })), nT));
+      const flameGeo = own(new THREE.ConeGeometry(0.13, 0.42, 7).translate(0, 1.76, 0.08));
+      this.flameMat = own(new THREE.MeshBasicMaterial({ color: 0xffa83a }));
+      const fm = add(new THREE.InstancedMesh(flameGeo, this.flameMat, nT));
+      this.torches.forEach((t, i) => { put(bm2, i, t.x, 0, t.z, t.yaw); put(fm, i, t.x, 0, t.z, t.yaw); });
+    }
+    this.lightSrc = [...this.braziers.map((p) => ({ x: p.x, y: 1.7, z: p.z })), ...this.torches.map((t) => ({ x: t.x, y: 1.55, z: t.z }))];
     this.poolMat = own(new THREE.MeshBasicMaterial({ map: radialTexture(), color: 0xffa050, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
-    this.pools = add(new THREE.InstancedMesh(own(new THREE.PlaneGeometry(2, 2)), this.poolMat, Math.max(1, this.braziers.length)));
-    this.pools.count = this.braziers.length; this.pools.renderOrder = 1;
-    this.braziers.forEach((p, i) => this.pools.setMatrixAt(i, _m.compose(_p.set(p.x, 0.035, p.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)), _s.set(3.4, 3.4, 3.4))));
+    this.pools = add(new THREE.InstancedMesh(own(new THREE.PlaneGeometry(2, 2)), this.poolMat, Math.max(1, this.lightSrc.length)));
+    this.pools.count = this.lightSrc.length; this.pools.renderOrder = 1;
+    this.lightSrc.forEach((p, i) => this.pools.setMatrixAt(i, _m.compose(_p.set(p.x, 0.035, p.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)), _s.set(i < this.braziers.length ? 3.4 : 2.6, i < this.braziers.length ? 3.4 : 2.6, 3))));
     const hp: number[] = [];
     this.braziers.forEach((p) => hp.push(p.x, 1.35, p.z));
+    this.torches.forEach((t) => hp.push(t.x, 1.8, t.z));
     monos.forEach(({ p }) => hp.push(p.x, 1.8, p.z));
     const hg = own(new THREE.BufferGeometry()); hg.setAttribute('position', new THREE.Float32BufferAttribute(hp, 3));
     this.haloMat = own(new THREE.PointsMaterial({ map: radialTexture(), color: 0xffa050, size: 120, sizeAttenuation: false, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
@@ -302,12 +341,12 @@ export class DungeonInstancer {
     this.lightTimer -= dt;
     if (this.lightTimer <= 0) {
       this.lightTimer = 0.25;
-      const near = this.braziers
+      const near = this.lightSrc
         .map((p) => ({ p, d: (p.x - player.x) ** 2 + (p.z - player.z) ** 2 }))
         .sort((a, c) => a.d - c.d).slice(0, NUM_LIGHTS);
       for (let i = 0; i < NUM_LIGHTS; i++) {
         const n = near[i];
-        if (n && n.d < 26 * 26) { this.lights[i].position.set(n.p.x, 1.7, n.p.z); this.lights[i].userData.on = 1; this.emberCenters[i].set(n.p.x, 0, n.p.z); }
+        if (n && n.d < 26 * 26) { this.lights[i].position.set(n.p.x, n.p.y, n.p.z); this.lights[i].userData.on = 1; this.emberCenters[i].set(n.p.x, n.p.y - 1.7, n.p.z); }
         else { this.lights[i].userData.on = 0; this.emberCenters[i].set(0, -50, 0); }
       }
     }
@@ -317,6 +356,7 @@ export class DungeonInstancer {
       this.poolMat.color.setHex(0xffa050).lerp(new THREE.Color(0x3fffd0), b); this.poolMat.opacity = 0.5 * fl;
       this.haloMat.color.setHex(0xffa050).lerp(new THREE.Color(0x7affd0), b); this.haloMat.opacity = 0.5 * fl; this.haloMat.size = this.haloBase * (0.95 + 0.1 * fl);
     }
+    if (this.flameMat) this.flameMat.color.setHex(0xffa83a).lerp(new THREE.Color(0x7affd0), b);
     const warm = new THREE.Color(0xff9a45), cold = new THREE.Color(0x4fffd0);
     for (let i = 0; i < NUM_LIGHTS; i++) {
       const l = this.lights[i];
