@@ -53,6 +53,7 @@ export class DungeonInstancer {
   private lightSrc: Array<{ x: number; y: number; z: number }> = [];
   readonly torches: Array<{ x: number; z: number; yaw: number }> = [];
   private flameMat!: THREE.MeshBasicMaterial;
+  private inlayMat?: THREE.MeshBasicMaterial;
 
   constructor(readonly dungeon: Dungeon) {
     const d = dungeon;
@@ -79,18 +80,49 @@ export class DungeonInstancer {
     const floorGeo = own(new THREE.BoxGeometry(TILE, 0.4, TILE).translate(0, -0.2, 0));
     const floorVariants = ['floor_a', 'floor_b'].map((n, v) => {
       const map = tex(n);
-      const mat = own(lit(createToonMaterial({ color: 0xffffff, map, veins: 1, rim: 0.4, band: 0.2 }), map, 0.6));
+      const mat = own(lit(createToonMaterial({ color: 0xffffff, map, veins: 1, rim: 0.4, band: 0.2 }), map, 0.9));
       const tiles = floorTiles.filter((idx) => ((hash(idx % GRID, (idx / GRID) | 0) * 7) | 0) % 2 === v);
       return { mat, tiles };
     });
+    // per-room floor tint: warm start hall, cool crypts, teal-leaning boss hall; plus worn / cracked tiles
+    const roomTint = (x: number, y: number): [number, number, number] => {
+      const r = d.rooms.find((q) => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h);
+      if (!r) return [0.9, 0.9, 0.92];
+      if (r.kind === 'start') return [1.08, 0.98, 0.84];
+      if (r.kind === 'boss') return [0.92, 1.0, 1.1];
+      return r.decor.some((q) => q.id === 'sarcophagus') ? [0.9, 1.02, 1.1] : [1.04, 1.0, 0.94];
+    };
     for (const { mat, tiles } of floorVariants) {
       const mesh = add(new THREE.InstancedMesh(floorGeo, mat, Math.max(1, tiles.length)));
       mesh.count = tiles.length;
       tiles.forEach((idx, n) => {
-        const x = idx % GRID, y = (idx / GRID) | 0, h = hash(x, y);
+        const x = idx % GRID, y = (idx / GRID) | 0, h = hash(x, y), w = hash(x * 1.7 + 3, y * 2.3 + 1);
         put(mesh, n, tileToWorld(x), 0, tileToWorld(y), Math.floor(hash(y, x) * 4) * Math.PI / 2);
-        mesh.setColorAt(n, c.setScalar(0.82 + h * 0.18));
+        const k = (w < 0.1 ? 0.7 : 1.0 + h * 0.3) * 1.12, [tr, tg, tb] = roomTint(x, y);
+        mesh.setColorAt(n, c.setRGB(k * tr, k * tg, k * tb));
       });
+    }
+    // inlaid rune rings / borders: one merged glow mesh for every room
+    const inlay: THREE.BufferGeometry[] = [];
+    const ring = (cx: number, cz: number, r0: number, r1: number, seg = 64) => inlay.push(new THREE.RingGeometry(r0, r1, seg).rotateX(-Math.PI / 2).translate(cx, 0.03, cz));
+    for (const r of d.rooms) {
+      if (r.kind === 'start') { ring(r.center.x, r.center.z, 2.9, 3.0); continue; }
+      const { x: cx, z: cz } = r.center;
+      if (r.kind === 'boss') {
+        ring(cx, cz, 3.3, 3.45); ring(cx, cz, 4.7, 4.8); ring(cx, cz, 6.4, 6.5);
+        for (let a = 0; a < 8; a++) inlay.push(new THREE.PlaneGeometry(0.1, 3.2).rotateX(-Math.PI / 2).translate(0, 0, -4.7).rotateY(a * Math.PI / 4 + Math.PI / 8).translate(cx, 0.03, cz));
+      } else {
+        ring(cx, cz, 2.1, 2.2, 48);
+      }
+      if (r.shape === 'rect') { // stone-inlay border two tiles in from the walls
+        const hw = (r.w / 2 - 2) * TILE, hh = (r.h / 2 - 2) * TILE;
+        if (hw > 2 && hh > 2) for (const [sx, sz, w, h] of [[0, -hh, hw * 2, 0.1], [0, hh, hw * 2, 0.1], [-hw, 0, 0.1, hh * 2], [hw, 0, 0.1, hh * 2]] as number[][]) inlay.push(new THREE.PlaneGeometry(w, h).rotateX(-Math.PI / 2).translate(cx + sx, 0.03, cz + sz));
+      }
+    }
+    if (inlay.length) {
+      this.inlayMat = own(new THREE.MeshBasicMaterial({ color: 0x35e0ff, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+      const im = new THREE.Mesh(own(mergeGeometries(inlay.map((g) => { g.deleteAttribute('uv'); g.deleteAttribute('normal'); return g; }))!), this.inlayMat);
+      im.frustumCulled = false; im.renderOrder = 1; this.group.add(im); this.drawCalls++;
     }
     const vcMat = own(createToonMaterial({ vertexColors: true, rim: 1 }));
     // props with an imported painted texture get their own lit material; procedural ones use vertex colours
@@ -356,6 +388,7 @@ export class DungeonInstancer {
       this.poolMat.color.setHex(0xffa050).lerp(new THREE.Color(0x3fffd0), b); this.poolMat.opacity = 0.5 * fl;
       this.haloMat.color.setHex(0xffa050).lerp(new THREE.Color(0x7affd0), b); this.haloMat.opacity = 0.5 * fl; this.haloMat.size = this.haloBase * (0.95 + 0.1 * fl);
     }
+    if (this.inlayMat) { this.inlayMat.opacity = 0.34 + 0.12 * Math.sin(t * 1.4); this.inlayMat.color.setHex(0x35e0ff).lerp(new THREE.Color(0x9affc8), b); }
     if (this.flameMat) this.flameMat.color.setHex(0xffa83a).lerp(new THREE.Color(0x7affd0), b);
     const warm = new THREE.Color(0xff9a45), cold = new THREE.Color(0x4fffd0);
     for (let i = 0; i < NUM_LIGHTS; i++) {

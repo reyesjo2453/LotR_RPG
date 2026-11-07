@@ -7,9 +7,9 @@ const { chromium } = require('/opt/node-tools/node_modules/playwright');
   await pg.waitForTimeout(5000);
   await pg.addStyleTag({ content: 'body > *:not(canvas){visibility:hidden !important}' });
   await pg.evaluate(() => window.__game.setZoom(1.9));
-  const want = [['boss',6],['crypt',4],['ruin',1]];
+  const want = [['boss',6],['crypt',4],['ruin',1],['start',0]];
   for (const [n,id] of want) {
-    await pg.evaluate((id) => { const g = window.__game; const r = g.dungeon.rooms[id]; g.p.x = r.center.x - (r.w/2-4)*2.5; g.p.z = r.center.z - (r.h/2-4)*2.5; }, id);
+    await pg.evaluate((id) => { const g = window.__game; const rs = g.dungeon.rooms; const r = id === 6 ? rs.find(q=>q.kind==='boss') : id === 4 ? (rs.find(q=>q.decor.some(d=>d.id==='sarcophagus'&&q.kind==='combat'))||rs[1]) : rs[Math.min(id, rs.length-1)]; g.p.x = r.center.x - (r.w/2-4)*2.5; g.p.z = r.center.z - (r.h/2-4)*2.5; }, id);
     await pg.waitForTimeout(3500);
     await pg.screenshot({ path: `mixamo/level/${n}.png` });
   }
