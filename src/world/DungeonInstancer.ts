@@ -77,13 +77,18 @@ export class DungeonInstancer {
     };
     const lit = (m: THREE.MeshLambertMaterial, map: THREE.Texture, k: number) => { m.emissiveMap = map; m.emissive = new THREE.Color(1, 1, 1); m.emissiveIntensity = k; return m; };
     const c = new THREE.Color();
-    const floorGeo = own(new THREE.BoxGeometry(TILE, 0.4, TILE).translate(0, -0.2, 0));
-    const floorVariants = ['floor_a', 'floor_b'].map((n, v) => {
-      const map = tex(n);
-      const mat = own(lit(createToonMaterial({ color: 0xffffff, map, veins: 1, rim: 0.4, band: 0.2 }), map, 0.9));
-      const tiles = floorTiles.filter((idx) => ((hash(idx % GRID, (idx / GRID) | 0) * 7) | 0) % 2 === v);
-      return { mat, tiles };
+    // One continuous flagstone texture mapped in world space: the image spans 2x2 tiles, so each tile uses one quadrant
+    // chosen by its grid parity and neighbouring tiles join with no seam (no per-tile rotation, which would break it).
+    const floorMap = tex('floor_c');
+    const floorMat = own(lit(createToonMaterial({ color: 0xffffff, map: floorMap, veins: 0.6, rim: 0.4, band: 0.2 }), floorMap, 0.3));
+    const floorGeos = [0, 1, 2, 3].map((q) => {
+      const g = new THREE.BoxGeometry(TILE, 0.4, TILE).translate(0, -0.2, 0);
+      const pos = g.attributes.position as THREE.BufferAttribute, uv = g.attributes.uv as THREE.BufferAttribute;
+      const px = q & 1, pz = q >> 1;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (px + pos.getX(i) / TILE + 0.5) / 2, 1 - (pz + pos.getZ(i) / TILE + 0.5) / 2);
+      return own(g);
     });
+    const floorVariants = floorGeos.map((geo, q) => ({ geo, tiles: floorTiles.filter((idx) => ((idx % GRID) & 1) + 2 * (((idx / GRID) | 0) & 1) === q) }));
     // per-room floor tint: warm start hall, cool crypts, teal-leaning boss hall; plus worn / cracked tiles
     const roomTint = (x: number, y: number): [number, number, number] => {
       const r = d.rooms.find((q) => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h);
@@ -92,13 +97,13 @@ export class DungeonInstancer {
       if (r.kind === 'boss') return [0.92, 1.0, 1.1];
       return r.decor.some((q) => q.id === 'sarcophagus') ? [0.9, 1.02, 1.1] : [1.04, 1.0, 0.94];
     };
-    for (const { mat, tiles } of floorVariants) {
-      const mesh = add(new THREE.InstancedMesh(floorGeo, mat, Math.max(1, tiles.length)));
+    for (const { geo, tiles } of floorVariants) {
+      const mesh = add(new THREE.InstancedMesh(geo, floorMat, Math.max(1, tiles.length)));
       mesh.count = tiles.length;
       tiles.forEach((idx, n) => {
         const x = idx % GRID, y = (idx / GRID) | 0, h = hash(x, y), w = hash(x * 1.7 + 3, y * 2.3 + 1);
-        put(mesh, n, tileToWorld(x), 0, tileToWorld(y), Math.floor(hash(y, x) * 4) * Math.PI / 2);
-        const k = (w < 0.1 ? 0.7 : 1.0 + h * 0.3) * 1.12, [tr, tg, tb] = roomTint(x, y);
+        put(mesh, n, tileToWorld(x), 0, tileToWorld(y));
+        const k = (w < 0.1 ? 0.88 : 1.0 + h * 0.1) * 0.72, [tr, tg, tb] = roomTint(x, y);
         mesh.setColorAt(n, c.setRGB(k * tr, k * tg, k * tb));
       });
     }
