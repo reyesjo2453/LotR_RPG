@@ -11,7 +11,8 @@ import { toonifyObject } from '../shaders/ToonRealm';
 
 const CHARACTERS: CharacterId[] = ['vaelen', 'seraphina', 'kaelen', 'castellan_knight', 'barrow_hound'];
 const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runestone_monolith', 'bridge_broken', 'archway_gate', 'wall_corner', 'wall_alcove', 'floor_edge',
-  'pillar_broken', 'rubble_pile', 'pillar_fallen', 'pedestal_cracked', 'statue_knight', 'arch_fragment', 'sarcophagus', 'altar_offering', 'obelisk_rune', 'coffin_open', 'offering_bowl', 'arch_spectral', 'brazier_blue', 'barrels_stack', 'throne_stone', 'cage_iron', 'wall_torch_sconce'];
+  'pillar_broken', 'rubble_pile', 'pillar_fallen', 'pedestal_cracked', 'statue_knight', 'arch_fragment', 'sarcophagus', 'altar_offering', 'obelisk_rune', 'coffin_open', 'offering_bowl', 'arch_spectral', 'brazier_blue', 'barrels_stack', 'throne_stone', 'cage_iron', 'wall_torch_sconce',
+  'candelabra', 'crate_wood', 'bones_pile', 'stone_dais', 'marble_wall', 'marble_window', 'marble_column_spiral', 'marble_pedestal', 'marble_floor_tile', 'marble_stairs', 'marble_chest', 'lotus_shrine', 'rune_monolith'];
 const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit', 'combo', 'stab', 'dodge'] as const;
 const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8, kaelen: 1.55, castellan_knight: 2.7, barrow_hound: 1.05 };
 
@@ -46,6 +47,11 @@ const ENV_FIT: Partial<Record<EnvPropId, { h?: number; box?: [number, number, nu
   arch_fragment: { h: 2.6 }, sarcophagus: { h: 1.1 }, altar_offering: { h: 1.0 }, obelisk_rune: { h: 2.4 }, coffin_open: { h: 0.9 },
   offering_bowl: { h: 1.0 }, arch_spectral: { h: 3.0 }, brazier_blue: { h: 1.45 }, barrels_stack: { h: 0.95 }, throne_stone: { h: 2.0 }, cage_iron: { h: 1.5 },
   wall_torch_sconce: { h: 0.573, wall: true }, // wall-mounted: x/y centred, back plate left at z=0 and the piece projects toward +z
+  // painted props modelled in Blender (sizes match the authored meshes; marble_* are the white-marble kit)
+  candelabra: { h: 1.3 }, crate_wood: { h: 0.76 }, bones_pile: { h: 0.33 }, stone_dais: { box: [2.5, 0.67, 2.5] },
+  marble_wall: { box: [2.5, 1.84, 0.45] }, marble_window: { box: [2.5, 1.8, 0.45] }, marble_floor_tile: { box: [2.5, 0.13, 2.5] },
+  marble_column_spiral: { h: 1.88 }, marble_pedestal: { h: 1.6 }, marble_stairs: { h: 1.2 }, marble_chest: { h: 0.94 },
+  lotus_shrine: { h: 0.57 }, rune_monolith: { h: 1.34 },
   bridge_broken: { box: [2.5, 0.3, 2.5], sink: 0.3 }, // one tile, top flush with the floor
 };
 
@@ -239,9 +245,12 @@ class AssetRegistry {
   private env = new Map<EnvPropId, THREE.Group>();
   private envGeo = new Map<EnvPropId, THREE.BufferGeometry>();
   private envMap = new Map<EnvPropId, THREE.Texture>();
+  private envNormal = new Map<EnvPropId, THREE.Texture>();
   /** Albedo texture of an imported (textured) prop, if it has one. Call after getEnvGeometry. */
   hasEnv(id: EnvPropId): boolean { return this.env.has(id); }
   getEnvMap(id: EnvPropId): THREE.Texture | null { return this.envMap.get(id) ?? null; }
+  /** Tangent-space normal map of an imported prop, if it ships one. Call after getEnvGeometry. */
+  getEnvNormal(id: EnvPropId): THREE.Texture | null { return this.envNormal.get(id) ?? null; }
   /** Which assets were found on disk (everything else is procedural). */
   readonly loaded: string[] = [];
 
@@ -303,8 +312,8 @@ class AssetRegistry {
     let g = this.envGeo.get(id);
     if (!g) {
       const src = this.env.get(id) ?? buildEnvProp(id);
-      let map: THREE.Texture | null = null;
-      src.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (!map && m?.map) map = m.map; });
+      let map: THREE.Texture | null = null, nmap: THREE.Texture | null = null;
+      src.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (!map && m?.map) map = m.map; if (!nmap && m?.normalMap) nmap = m.normalMap; });
       g = mergeToGeometry(src, !!map);
       // normalise imported props to the size and footprint of the procedural kit
       if (this.env.has(id)) {
@@ -315,6 +324,7 @@ class AssetRegistry {
         else if (fit?.box) g.scale(fit.box[0] / (bb.max.x - bb.min.x), fit.box[1] / (bb.max.y - bb.min.y), fit.box[2] / (bb.max.z - bb.min.z));
         if (fit?.sink) g.translate(0, -fit.sink, 0);
         if (map) this.envMap.set(id, map);
+        if (map && nmap) this.envNormal.set(id, nmap);
       }
       this.envGeo.set(id, g);
     }

@@ -186,7 +186,8 @@ export function generateDungeon(seedIn: number | string): Dungeon {
   }
 
   // Painted set dressing: themed per room, placed with a hash-based RNG so the layout above is unchanged.
-  const DECOR_R: Partial<Record<EnvPropId, number>> = { pillar_broken: 0.45, rubble_pile: 0.8, pillar_fallen: 0.7, pedestal_cracked: 0.4, statue_knight: 0.5, arch_fragment: 0.6, sarcophagus: 0.8, altar_offering: 0.9, obelisk_rune: 0.35, coffin_open: 0.6, offering_bowl: 0.4, barrels_stack: 0.55, throne_stone: 0.7, cage_iron: 0.65 };
+  const DECOR_R: Partial<Record<EnvPropId, number>> = { pillar_broken: 0.45, rubble_pile: 0.8, pillar_fallen: 0.7, pedestal_cracked: 0.4, statue_knight: 0.5, arch_fragment: 0.6, sarcophagus: 0.8, altar_offering: 0.9, obelisk_rune: 0.35, coffin_open: 0.6, offering_bowl: 0.4, barrels_stack: 0.55, throne_stone: 0.7, cage_iron: 0.65,
+    candelabra: 0.35, crate_wood: 0.45, bones_pile: 0.4, stone_dais: 1.2, marble_chest: 0.55, marble_pedestal: 0.4, marble_column_spiral: 0.35, lotus_shrine: 0.6, rune_monolith: 0.5, marble_stairs: 1.0 };
   const hz = (a: number, b: number) => { const v = Math.sin(a * 127.1 + b * 311.7 + 7.7) * 43758.5453; return v - Math.floor(v); };
   for (const r of rooms) {
     let n = 0;
@@ -208,15 +209,18 @@ export function generateDungeon(seedIn: number | string): Dungeon {
         return;
       }
     };
-    if (r.kind === 'start') { place('rubble_pile', true); place('pillar_fallen', true); place('barrels_stack', true); continue; }
+    if (r.kind === 'start') { place('rubble_pile', true); place('pillar_fallen', true); place('barrels_stack', true); place('crate_wood', true); place('crate_wood', true); place('bones_pile', false); place('candelabra', true); continue; }
     if (r.kind === 'boss') {
       place('statue_knight', true); place('statue_knight', true); place('obelisk_rune', true); place('obelisk_rune', true);
       place('sarcophagus', true); place('sarcophagus', true); place('altar_offering', true); place('throne_stone', true); place('offering_bowl', false); place('rubble_pile', true); place('rubble_pile', true);
+      place('stone_dais', false); place('rune_monolith', true); place('rune_monolith', true); place('marble_column_spiral', true); place('marble_column_spiral', true); place('candelabra', true); place('lotus_shrine', false);
     } else if (rnd() < 0.4) {
       place('sarcophagus', true); place('sarcophagus', true); place('coffin_open', true); place('offering_bowl', false); place('obelisk_rune', true); place('cage_iron', true);
+      place('bones_pile', false); place('bones_pile', true); place('candelabra', true); place('candelabra', true);
     } else {
       place('pillar_broken', true); place('rubble_pile', true); place('rubble_pile', true); place('pillar_fallen', false); place('barrels_stack', true);
       if (rnd() < 0.5) place('arch_fragment', true); else { place('pedestal_cracked', true); place('statue_knight', true); }
+      place('marble_chest', true); place('crate_wood', true); place('marble_pedestal', true); place('marble_column_spiral', true); place('lotus_shrine', false); place('rune_monolith', true); place('marble_stairs', true);
     }
     place('arch_spectral', true, true); place('brazier_blue', false, true);
   }

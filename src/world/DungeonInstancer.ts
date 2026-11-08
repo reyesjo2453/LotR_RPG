@@ -135,6 +135,7 @@ export class DungeonInstancer {
       const geo = assets.getEnvGeometry(id), map = assets.getEnvMap(id);
       if (!map) return [geo, vcMat];
       const m = own(createToonMaterial({ map, rim: 1, band: 0.5 })) as THREE.MeshLambertMaterial;
+      const nrm = assets.getEnvNormal(id); if (nrm) { m.normalMap = nrm; m.normalScale.set(0.8, 0.8); } // baked surface relief (marble kit)
       m.emissiveMap = map; m.emissive = new THREE.Color(1, 1, 1); m.emissiveIntensity = 0.4; // keep dark art readable
       return [geo, m];
     };

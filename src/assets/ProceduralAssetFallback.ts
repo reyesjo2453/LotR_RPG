@@ -5,7 +5,8 @@ export type CharacterId = 'vaelen' | 'seraphina' | 'kaelen' | 'castellan_knight'
 export type EnvPropId = 'pillar_elven' | 'wall_segment' | 'brazier_iron' | 'runestone_monolith' | 'bridge_broken' | 'archway_gate' | 'wall_corner' | 'wall_alcove' | 'floor_edge'
   | 'pillar_broken' | 'rubble_pile' | 'pillar_fallen' | 'pedestal_cracked' | 'statue_knight' | 'arch_fragment' | 'sarcophagus' | 'altar_offering'
   | 'obelisk_rune' | 'coffin_open' | 'offering_bowl' | 'arch_spectral' | 'brazier_blue' | 'barrels_stack' | 'throne_stone' | 'cage_iron'
-  | 'wall_torch_sconce';
+  | 'wall_torch_sconce'
+  | 'candelabra' | 'crate_wood' | 'bones_pile' | 'stone_dais' | 'marble_wall' | 'marble_window' | 'marble_column_spiral' | 'marble_pedestal' | 'marble_floor_tile' | 'marble_stairs' | 'marble_chest' | 'lotus_shrine' | 'rune_monolith';
 export type OneShot = 'slash' | 'hit' | 'combo' | 'stab' | 'dodge' | 'swing1' | 'swing2' | 'swing3' | 'swing4';
 
 /** Unified animation controller: procedural rigs and GLB mixers both implement this. */
@@ -314,6 +315,7 @@ export function buildEnvProp(id: EnvPropId): THREE.Group {
     }
     case 'pillar_broken': case 'rubble_pile': case 'pillar_fallen': case 'pedestal_cracked': case 'statue_knight': case 'arch_fragment': case 'sarcophagus':
     case 'altar_offering': case 'obelisk_rune': case 'coffin_open': case 'offering_bowl': case 'arch_spectral': case 'brazier_blue': case 'barrels_stack': case 'throne_stone': case 'cage_iron': case 'wall_torch_sconce':
+    case 'candelabra': case 'crate_wood': case 'bones_pile': case 'stone_dais': case 'marble_wall': case 'marble_window': case 'marble_column_spiral': case 'marble_pedestal': case 'marble_floor_tile': case 'marble_stairs': case 'marble_chest': case 'lotus_shrine': case 'rune_monolith':
       add(g, box(0.6, 0.6, 0.6), mat(STONE), 0, 0.3, 0); return g; // stand-in until the painted model loads
     case 'wall_corner':
     case 'wall_alcove':
