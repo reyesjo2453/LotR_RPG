@@ -12,7 +12,7 @@ import { toonifyObject } from '../shaders/ToonRealm';
 const CHARACTERS: CharacterId[] = ['vaelen', 'seraphina', 'kaelen', 'castellan_knight', 'barrow_hound'];
 const ENV: EnvPropId[] = ['pillar_elven', 'wall_segment', 'brazier_iron', 'runestone_monolith', 'bridge_broken', 'archway_gate', 'wall_corner', 'wall_alcove', 'floor_edge',
   'pillar_broken', 'rubble_pile', 'pillar_fallen', 'pedestal_cracked', 'statue_knight', 'arch_fragment', 'sarcophagus', 'altar_offering', 'obelisk_rune', 'coffin_open', 'offering_bowl', 'arch_spectral', 'brazier_blue', 'barrels_stack', 'throne_stone', 'cage_iron', 'wall_torch_sconce',
-  'candelabra', 'crate_wood', 'bones_pile', 'stone_dais', 'marble_wall', 'marble_window', 'marble_column_spiral', 'marble_pedestal', 'marble_floor_tile', 'marble_stairs', 'marble_chest', 'lotus_shrine', 'rune_monolith'];
+  'candelabra', 'crate_wood', 'bones_pile', 'stone_dais', 'marble_wall', 'marble_window', 'marble_column_spiral', 'marble_pedestal', 'marble_floor_tile', 'marble_stairs', 'marble_chest', 'lotus_shrine', 'rune_monolith', 'wall_pilaster_rune', 'wall_corner_column', 'wall_ledge_cap'];
 const CLIP_SUFFIXES = ['idle', 'run', 'slash', 'hit', 'combo', 'stab', 'dodge'] as const;
 const TARGET_HEIGHT: Record<CharacterId, number> = { vaelen: 1.9, seraphina: 1.8, kaelen: 1.55, castellan_knight: 2.7, barrow_hound: 1.05 };
 
@@ -52,6 +52,7 @@ const ENV_FIT: Partial<Record<EnvPropId, { h?: number; box?: [number, number, nu
   marble_wall: { box: [2.5, 1.84, 0.45] }, marble_window: { box: [2.5, 1.8, 0.45] }, marble_floor_tile: { box: [2.5, 0.13, 2.5] },
   marble_column_spiral: { h: 1.88 }, marble_pedestal: { h: 1.6 }, marble_stairs: { h: 1.2 }, marble_chest: { h: 0.94 },
   lotus_shrine: { h: 0.57 }, rune_monolith: { h: 1.34 },
+  wall_pilaster_rune: { box: [2.5, 1.84, 0.45] }, wall_corner_column: { h: 1.84 }, wall_ledge_cap: { box: [2.6, 0.22, 2.6] },
   bridge_broken: { box: [2.5, 0.3, 2.5], sink: 0.3 }, // one tile, top flush with the floor
 };
 

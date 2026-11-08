@@ -43,7 +43,7 @@ export class DungeonInstancer {
   private flickerSeed: number[] = [];
   private owned: Array<{ dispose(): void }> = [];
   drawCalls = 0;
-  private slabSets: Array<{ mesh: THREE.InstancedMesh; list: Array<{ x: number; z: number; yaw: number; h: number }> }> = [];
+  private slabSets: Array<{ mesh: THREE.InstancedMesh; list: Array<{ x: number; z: number; yaw: number; h: number; y?: number }> }> = [];
   private slabTimer = 0;
   private ghostMats: THREE.MeshLambertMaterial[] = [];
   private ghostMeshes: THREE.InstancedMesh[] = [];
@@ -152,7 +152,8 @@ export class DungeonInstancer {
     const tallTiles = wallTiles.filter((i) => isTall(i % GRID, (i / GRID) | 0));
     const lowTiles = wallTiles.filter((i) => !isTall(i % GRID, (i / GRID) | 0));
     const wallGeo = own(new THREE.BoxGeometry(TILE, 2.4, TILE).translate(0, facade ? 0.5 : 0.8, 0));
-    const ledgeGeo = own(mergeGeometries([
+    const paintedCap = assets.hasEnv('wall_ledge_cap');
+    const ledgeGeo = own(mergeGeometries(paintedCap ? [new THREE.BoxGeometry(TILE, 1.0, TILE)] : [
       new THREE.BoxGeometry(TILE, 1.0, TILE).translate(0, 0.0, 0),
       new THREE.BoxGeometry(TILE + 0.1, 0.16, TILE + 0.1).translate(0, 0.58, 0),
     ])!);
@@ -172,7 +173,17 @@ export class DungeonInstancer {
         ledge.setColorAt(n, c.setScalar(0.95 + h * 0.2));
       });
     }
-    const faces: Array<{ x: number; z: number; yaw: number; alcove: boolean; h: number }> = [];
+    if (paintedCap && lowTiles.length) { // painted stone coping on every cut-down wall (static, one draw call)
+      const cap = add(new THREE.InstancedMesh(...propFor('wall_ledge_cap'), lowTiles.length));
+      lowTiles.forEach((idx, n) => {
+        const x = idx % GRID, y = (idx / GRID) | 0;
+        put(cap, n, tileToWorld(x), 0.5, tileToWorld(y), Math.floor(hash(x, y) * 4) * Math.PI / 2);
+        cap.setColorAt(n, c.setScalar(0.95 + hash(y, x) * 0.2));
+      });
+    }
+    type Face = { x: number; z: number; yaw: number; kind: 'wall_segment' | 'wall_alcove' | 'wall_pilaster_rune'; h: number };
+    const faces: Face[] = [];
+    const corners: Array<{ x: number; z: number; yaw: number; h: number }> = [];
     const slabOut = TILE / 2 + 0.2 - 0.225; // the brick plane sits ~0.2 behind the slab's outer edge, so push the slab out until it clears the core box
     for (const idx of facade ? tallTiles : []) {
       const x = idx % GRID, y = (idx / GRID) | 0;
@@ -180,13 +191,18 @@ export class DungeonInstancer {
         if (!walkable(x + dx, y + dz)) continue;
         const h = hash(x * 3 + dx * 7, y * 5 + dz * 11);
         const alcove = h < 0.12 && assets.hasEnv('wall_alcove');
-        faces.push({ x: tileToWorld(x) + dx * slabOut, z: tileToWorld(y) + dz * slabOut, yaw: Math.atan2(dx, dz), alcove, h });
+        const pilaster = !alcove && h >= 0.55 && h < 0.8 && assets.hasEnv('wall_pilaster_rune');
+        faces.push({ x: tileToWorld(x) + dx * slabOut, z: tileToWorld(y) + dz * slabOut, yaw: Math.atan2(dx, dz), kind: alcove ? 'wall_alcove' : pilaster ? 'wall_pilaster_rune' : 'wall_segment', h });
         if (!alcove && h > 0.12 && h < 0.3 && (x + y) % 2 === 0) this.torches.push({ x: tileToWorld(x) + dx * (TILE / 2 + 0.3), z: tileToWorld(y) + dz * (TILE / 2 + 0.3), yaw: Math.atan2(dx, dz) });
       }
     }
+    if (assets.hasEnv('wall_corner_column')) for (const idx of tallTiles) { // outer corners of a wall mass get a painted column
+      const x = idx % GRID, y = (idx / GRID) | 0;
+      if (walkable(x + 1, y) && walkable(x, y + 1) && walkable(x + 1, y + 1)) corners.push({ x: tileToWorld(x) + TILE / 2 - 0.05, z: tileToWorld(y) + TILE / 2 - 0.05, yaw: 0, h: hash(x, y) });
+    }
     // Only slabs near the player are drawn (re-selected a few times a second): bounds the triangle load on phones.
-    for (const kind of ['wall_segment', 'wall_alcove'] as const) {
-      const list = faces.filter((f) => f.alcove === (kind === 'wall_alcove'));
+    const sets: Array<[EnvPropId, Array<{ x: number; z: number; yaw: number; h: number }>]> = [['wall_segment', faces.filter((f) => f.kind === 'wall_segment')], ['wall_alcove', faces.filter((f) => f.kind === 'wall_alcove')], ['wall_pilaster_rune', faces.filter((f) => f.kind === 'wall_pilaster_rune')], ['wall_corner_column', corners]];
+    for (const [kind, list] of sets) {
       if (!list.length) continue;
       const mesh = add(new THREE.InstancedMesh(...propFor(kind), list.length));
       mesh.count = 0;
