@@ -13,6 +13,8 @@ const EMBERS_PER_SLOT = 36;
 export interface MonolithRef { pos: Vec2; room: Room; index: number; alive: boolean; hp: number; maxHp: number }
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _e = new THREE.Euler();
+/** One instance of a distance-culled set: position, yaw, optional lift/scale, and its colour (k, else from h). */
+type Cull = { x: number; z: number; yaw: number; h: number; y?: number; sc?: number; k?: number };
 function put(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z: number, yaw = 0, sc = 1): void {
   _q.setFromEuler(_e.set(0, yaw, 0));
   mesh.setMatrixAt(i, _m.compose(_p.set(x, y, z), _q, _s.set(sc, sc, sc)));
@@ -43,7 +45,7 @@ export class DungeonInstancer {
   private flickerSeed: number[] = [];
   private owned: Array<{ dispose(): void }> = [];
   drawCalls = 0;
-  private slabSets: Array<{ mesh: THREE.InstancedMesh; list: Array<{ x: number; z: number; yaw: number; h: number; y?: number }> }> = [];
+  private slabSets: Array<{ mesh: THREE.InstancedMesh; list: Cull[] }> = [];
   private slabTimer = 0;
   private ghostMats: THREE.MeshLambertMaterial[] = [];
   private ghostMeshes: THREE.InstancedMesh[] = [];
@@ -88,14 +90,38 @@ export class DungeonInstancer {
       for (let i = 0; i < uv.count; i++) uv.setXY(i, (px + pos.getX(i) / TILE + 0.5) / 2, 1 - (pz + pos.getZ(i) / TILE + 0.5) / 2);
       return own(g);
     });
-    const floorVariants = floorGeos.map((geo, q) => ({ geo, tiles: floorTiles.filter((idx) => ((idx % GRID) & 1) + 2 * (((idx / GRID) | 0) & 1) === q) }));
+    // white-marble sanctum rooms get the marble kit's floor, baked flat from marble_floor_tile (12 tris a tile, not 2.4k)
+    const roomOf = (x: number, y: number) => d.rooms.find((q) => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h);
+    // medallion tiles form a cross-shaped aisle through the room's centre; the rest is pale flagstone
+    const isSanctum = (idx: number) => {
+      const x = idx % GRID, y = (idx / GRID) | 0, r = roomOf(x, y);
+      if (r?.theme !== 'sanctum') return false;
+      const cx = Math.floor(r.x + r.w / 2), cy = Math.floor(r.y + r.h / 2);
+      return x === cx || y === cy;
+    };
+    const marbleTiles = floorTiles.filter(isSanctum);
+    if (marbleTiles.length) {
+      const mMap = tex('floor_marble'), mNrm = tex('floor_marble_n'); mNrm.colorSpace = THREE.NoColorSpace;
+      const mMat = own(lit(createToonMaterial({ color: 0xffffff, map: mMap, rim: 0.4, band: 0.2 }), mMap, 0.3));
+      mMat.normalMap = mNrm; mMat.normalScale.set(0.8, 0.8);
+      const mGeo = own(new THREE.BoxGeometry(TILE, 0.4, TILE).translate(0, -0.2, 0));
+      const mm = add(new THREE.InstancedMesh(mGeo, mMat, marbleTiles.length));
+      marbleTiles.forEach((idx, n) => {
+        const x = idx % GRID, y = (idx / GRID) | 0, h = hash(x, y);
+        put(mm, n, tileToWorld(x), 0, tileToWorld(y), Math.floor(hash(y * 1.3, x * 0.7) * 4) * Math.PI / 2);
+        mm.setColorAt(n, c.setScalar(0.94 + h * 0.08));
+      });
+    }
+    const stoneTiles = marbleTiles.length ? floorTiles.filter((i) => !isSanctum(i)) : floorTiles;
+    const floorVariants = floorGeos.map((geo, q) => ({ geo, tiles: stoneTiles.filter((idx) => ((idx % GRID) & 1) + 2 * (((idx / GRID) | 0) & 1) === q) }));
     // per-room floor tint: warm start hall, cool crypts, teal-leaning boss hall; plus worn / cracked tiles
     const roomTint = (x: number, y: number): [number, number, number] => {
       const r = d.rooms.find((q) => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h);
       if (!r) return [0.9, 0.9, 0.92];
       if (r.kind === 'start') return [1.08, 0.98, 0.84];
       if (r.kind === 'boss') return [0.92, 1.0, 1.1];
-      return r.decor.some((q) => q.id === 'sarcophagus') ? [0.9, 1.02, 1.1] : [1.04, 1.0, 0.94];
+      if (r.theme === 'sanctum') return [1.3, 1.27, 1.2];
+      return r.theme === 'crypt' ? [0.9, 1.02, 1.1] : [1.04, 1.0, 0.94];
     };
     for (const { geo, tiles } of floorVariants) {
       const mesh = add(new THREE.InstancedMesh(geo, floorMat, Math.max(1, tiles.length)));
@@ -174,14 +200,13 @@ export class DungeonInstancer {
       });
     }
     if (paintedCap && lowTiles.length) { // painted stone coping on every cut-down wall (static, one draw call)
-      const cap = add(new THREE.InstancedMesh(...propFor('wall_ledge_cap'), lowTiles.length));
-      lowTiles.forEach((idx, n) => {
+      const cap = add(new THREE.InstancedMesh(...propFor('wall_ledge_cap'), lowTiles.length)); cap.count = 0;
+      this.slabSets.push({ mesh: cap, list: lowTiles.map((idx) => {
         const x = idx % GRID, y = (idx / GRID) | 0;
-        put(cap, n, tileToWorld(x), 0.5, tileToWorld(y), Math.floor(hash(x, y) * 4) * Math.PI / 2);
-        cap.setColorAt(n, c.setScalar(0.95 + hash(y, x) * 0.2));
-      });
+        return { x: tileToWorld(x), y: 0.5, z: tileToWorld(y), yaw: Math.floor(hash(x, y) * 4) * Math.PI / 2, h: 0, k: 0.95 + hash(y, x) * 0.2 };
+      }) });
     }
-    type Face = { x: number; z: number; yaw: number; kind: 'wall_segment' | 'wall_alcove' | 'wall_pilaster_rune'; h: number };
+    type Face = { x: number; z: number; yaw: number; kind: 'wall_segment' | 'wall_alcove' | 'wall_pilaster_rune' | 'marble_wall' | 'marble_window'; h: number };
     const faces: Face[] = [];
     const corners: Array<{ x: number; z: number; yaw: number; h: number }> = [];
     const slabOut = TILE / 2 + 0.2 - 0.225; // the brick plane sits ~0.2 behind the slab's outer edge, so push the slab out until it clears the core box
@@ -190,10 +215,12 @@ export class DungeonInstancer {
       for (const [dx, dz] of [[1, 0], [0, 1]]) { // only the camera-facing (room-interior) faces are ever seen
         if (!walkable(x + dx, y + dz)) continue;
         const h = hash(x * 3 + dx * 7, y * 5 + dz * 11);
-        const alcove = h < 0.12 && assets.hasEnv('wall_alcove');
-        const pilaster = !alcove && h >= 0.55 && h < 0.8 && assets.hasEnv('wall_pilaster_rune');
-        faces.push({ x: tileToWorld(x) + dx * slabOut, z: tileToWorld(y) + dz * slabOut, yaw: Math.atan2(dx, dz), kind: alcove ? 'wall_alcove' : pilaster ? 'wall_pilaster_rune' : 'wall_segment', h });
-        if (!alcove && h > 0.12 && h < 0.3 && (x + y) % 2 === 0) this.torches.push({ x: tileToWorld(x) + dx * (TILE / 2 + 0.3), z: tileToWorld(y) + dz * (TILE / 2 + 0.3), yaw: Math.atan2(dx, dz) });
+        const marble = roomOf(x + dx, y + dz)?.theme === 'sanctum' && assets.hasEnv('marble_wall');
+        const alcove = !marble && h < 0.12 && assets.hasEnv('wall_alcove');
+        const pilaster = !marble && !alcove && h >= 0.55 && h < 0.8 && assets.hasEnv('wall_pilaster_rune');
+        const win = marble && h < 0.3 && assets.hasEnv('marble_window');
+        faces.push({ x: tileToWorld(x) + dx * slabOut, z: tileToWorld(y) + dz * slabOut, yaw: Math.atan2(dx, dz), kind: win ? 'marble_window' : marble ? 'marble_wall' : alcove ? 'wall_alcove' : pilaster ? 'wall_pilaster_rune' : 'wall_segment', h });
+        if (!alcove && (marble ? h > 0.3 && h < 0.5 : h > 0.12 && h < 0.3) && (x + y) % 2 === 0) this.torches.push({ x: tileToWorld(x) + dx * (TILE / 2 + 0.3), z: tileToWorld(y) + dz * (TILE / 2 + 0.3), yaw: Math.atan2(dx, dz) });
       }
     }
     if (assets.hasEnv('wall_corner_column')) for (const idx of tallTiles) { // outer corners of a wall mass get a painted column
@@ -201,7 +228,8 @@ export class DungeonInstancer {
       if (walkable(x + 1, y) && walkable(x, y + 1) && walkable(x + 1, y + 1)) corners.push({ x: tileToWorld(x) + TILE / 2 - 0.05, z: tileToWorld(y) + TILE / 2 - 0.05, yaw: 0, h: hash(x, y) });
     }
     // Only slabs near the player are drawn (re-selected a few times a second): bounds the triangle load on phones.
-    const sets: Array<[EnvPropId, Array<{ x: number; z: number; yaw: number; h: number }>]> = [['wall_segment', faces.filter((f) => f.kind === 'wall_segment')], ['wall_alcove', faces.filter((f) => f.kind === 'wall_alcove')], ['wall_pilaster_rune', faces.filter((f) => f.kind === 'wall_pilaster_rune')], ['wall_corner_column', corners]];
+    const sets: Array<[EnvPropId, Array<{ x: number; z: number; yaw: number; h: number }>]> = [['wall_segment', faces.filter((f) => f.kind === 'wall_segment')], ['wall_alcove', faces.filter((f) => f.kind === 'wall_alcove')], ['wall_pilaster_rune', faces.filter((f) => f.kind === 'wall_pilaster_rune')],
+      ['marble_wall', faces.filter((f) => f.kind === 'marble_wall')], ['marble_window', faces.filter((f) => f.kind === 'marble_window')], ['wall_corner_column', corners]];
     for (const [kind, list] of sets) {
       if (!list.length) continue;
       const mesh = add(new THREE.InstancedMesh(...propFor(kind), list.length));
@@ -215,8 +243,8 @@ export class DungeonInstancer {
     const bridgeGeo = assets.getEnvGeometry('bridge_broken');
     const bridgeMap = assets.getEnvMap('bridge_broken');
     if (bridgeMap) { this.bridgeMat.vertexColors = false; (this.bridgeMat as THREE.MeshLambertMaterial).map = bridgeMap; this.bridgeMat.needsUpdate = true; }
-    const bridge = add(new THREE.InstancedMesh(bridgeGeo, this.bridgeMat, bridgeTiles.length));
-    bridgeTiles.forEach((idx, n) => put(bridge, n, tileToWorld(idx % GRID), 0, tileToWorld((idx / GRID) | 0)));
+    const bridge = add(new THREE.InstancedMesh(bridgeGeo, this.bridgeMat, Math.max(1, bridgeTiles.length))); bridge.count = 0;
+    this.slabSets.push({ mesh: bridge, list: bridgeTiles.map((idx) => ({ x: tileToWorld(idx % GRID), z: tileToWorld((idx / GRID) | 0), yaw: 0, h: 0, k: 1 })) });
     bridge.renderOrder = 2;
 
     // props
@@ -226,12 +254,16 @@ export class DungeonInstancer {
       this.braziers.push(...r.braziers);
       r.monoliths.forEach((p) => monos.push({ p, r }));
     }
-    const pm = add(new THREE.InstancedMesh(...propFor('pillar_elven'), Math.max(1, pillars.length)));
-    pm.count = pillars.length;
-    pillars.forEach((p, i) => put(pm, i, p.x, 0, p.z, hash(p.x, p.z) * 6.28, 0.72));
-    const bm = add(new THREE.InstancedMesh(...propFor('brazier_iron'), Math.max(1, this.braziers.length)));
-    bm.count = this.braziers.length;
-    this.braziers.forEach((p, i) => put(bm, i, p.x, 0, p.z, hash(p.z, p.x) * 6.28));
+    // pillars, braziers and dressing are drawn only near the player, like the wall slabs (phones can't take the whole floor)
+    const culled = (id: EnvPropId, list: Cull[], mat?: THREE.Material) => {
+      if (!list.length) return null;
+      const [geo, m] = propFor(id);
+      const mesh = add(new THREE.InstancedMesh(geo, mat ?? m, list.length)); mesh.count = 0;
+      this.slabSets.push({ mesh, list });
+      return mesh;
+    };
+    culled('pillar_elven', pillars.map((p) => ({ x: p.x, z: p.z, yaw: hash(p.x, p.z) * 6.28, h: 0, sc: 0.72, k: 1 })));
+    culled('brazier_iron', this.braziers.map((p) => ({ x: p.x, z: p.z, yaw: hash(p.z, p.x) * 6.28, h: 0, k: 1 })));
     this.monolithMesh = add(new THREE.InstancedMesh(...propFor('runestone_monolith'), Math.max(1, monos.length)));
     this.monolithMesh.count = monos.length;
     monos.forEach(({ p, r }, i) => {
@@ -251,8 +283,8 @@ export class DungeonInstancer {
         const gm = own(createToonMaterial({ map: assets.getEnvMap(id) ?? undefined, rim: 1.4, band: 0.5, transparent: true, opacity: 0, emissive: 0x2a5a7a })) as THREE.MeshLambertMaterial;
         gm.depthWrite = false; gm.emissiveIntensity = 0.5; this.ghostMats.push(gm); mat = gm;
       }
-      const mesh = add(new THREE.InstancedMesh(geo, mat, list.length));
-      list.forEach((q, i) => { put(mesh, i, q.x, 0, q.z, q.yaw); mesh.setColorAt(i, c.setScalar(0.85 + hash(q.x, q.z) * 0.15)); });
+      const mesh = add(new THREE.InstancedMesh(geo, mat, list.length)); mesh.count = 0;
+      this.slabSets.push({ mesh, list: list.map((q) => ({ x: q.x, y: q.y, z: q.z, yaw: q.yaw, h: 0, k: 0.85 + hash(q.x, q.z) * 0.15 })) });
       if (ghost) { mesh.visible = false; mesh.renderOrder = 2; this.ghostMeshes.push(mesh); }
     }
     this.decorShadows = decorAll.filter((q) => q.r > 0);
@@ -292,7 +324,8 @@ export class DungeonInstancer {
       const flameGeo = own(sconce ? new THREE.ConeGeometry(0.1, 0.4, 7).translate(0, 1.79, 0) : new THREE.ConeGeometry(0.13, 0.42, 7).translate(0, 1.76, 0.08));
       this.flameMat = own(new THREE.MeshBasicMaterial({ color: 0xffa83a }));
       const fm = add(new THREE.InstancedMesh(flameGeo, this.flameMat, nT));
-      this.torches.forEach((t, i) => { put(bm2, i, t.x, 0, t.z, t.yaw); put(fm, i, t.x, 0, t.z, t.yaw); });
+      const tl = this.torches.map((t) => ({ x: t.x, z: t.z, yaw: t.yaw, h: 0, k: 1 }));
+      bm2.count = fm.count = 0; this.slabSets.push({ mesh: bm2, list: tl }, { mesh: fm, list: tl });
     }
     this.lightSrc = [...this.braziers.map((p) => ({ x: p.x, y: 1.7, z: p.z })), ...this.torches.map((t) => ({ x: t.x, y: 1.55, z: t.z }))];
     this.poolMat = own(new THREE.MeshBasicMaterial({ map: radialTexture(), color: 0xffa050, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
@@ -371,8 +404,8 @@ export class DungeonInstancer {
       for (const f of list) {
         const dx = f.x - px, dz = f.z - pz;
         if (dx * dx + dz * dz > R2) continue;
-        put(mesh, n, f.x, 0, f.z, f.yaw);
-        mesh.setColorAt(n, c.setScalar(0.82 + f.h * 0.18));
+        put(mesh, n, f.x, f.y ?? 0, f.z, f.yaw, f.sc ?? 1);
+        mesh.setColorAt(n, c.setScalar(f.k ?? 0.82 + f.h * 0.18));
         n++;
       }
       mesh.count = n;
